@@ -243,9 +243,9 @@
                         </div>
                     </header>
                     <!-- PROPINAS -->
-<div class="absolute top-4 right-4 z-50">
-    <a href="https://ko-fi.com/foboz" target="_blank" class="flex items-center gap-2 bg-[#FF5E5B] hover:bg-[#ff4542] text-white px-4 py-2 rounded-full font-bold shadow-lg transition-transform hover:scale-105 text-xs">
-        <img src="https://storage.ko-fi.com/cdn/cup-border.png" class="w-4 h-4 animate-bounce"/>
+<div class="absolute top-4 right-4 z-50 hidden md:block">
+    <a href="https://ko-fi.com/foboz" target="_blank" class="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white px-4 py-2 rounded-full font-bold shadow-lg transition-all hover:scale-105 hover:shadow-rose-500/25 text-xs group">
+        <Icon name="coffee" className="text-white group-hover:animate-bounce"/>
         Invítame un café
     </a>
 </div>
@@ -335,4 +335,5 @@
         root.render(<App />);
 
     </script>
+
 
