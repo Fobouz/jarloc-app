@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JarLoc v5 - Auto Discovery</title>
+    
+    <!-- Librerías Necesarias -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        body { background-color: #020617; color: #e2e8f0; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .glass {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        }
+        .code-view { font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 0.8rem; }
+        .anim-spin { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const Icon = ({ name, className }) => <i data-lucide={name} className={className}></i>;
+
+        const App = () => {
+            // --- ESTADOS ---
+            const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_key_v5') || '');
+            const [modelsList, setModelsList] = useState([]);
+            const [selectedModel, setSelectedModel] = useState('');
+            const [connectionStatus, setConnectionStatus] = useState('idle'); // idle, loading, success, error
+            const [errorMsg, setErrorMsg] = useState('');
+
+            const [file, setFile] = useState(null);
+            const [filesInJar, setFilesInJar] = useState([]);
+            const [currentPath, setCurrentPath] = useState(null);
+            const [fileContent, setFileContent] = useState('');
+            const [translation, setTranslation] = useState('');
+            const [isTranslating, setIsTranslating] = useState(false);
+            const [logs, setLogs] = useState([]);
+
+            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [modelsList, connectionStatus, filesInJar, isTranslating]);
+
+            const log = (msg) => setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev]);
+
+            // --- 1. DESCUBRIMIENTO DE MODELOS ---
+            const discoverModels = async () => {
+                if(!apiKey) { setErrorMsg("Por favor pega tu API Key primero"); return; }
+                
+                setConnectionStatus('loading');
+                setErrorMsg('');
+                setModelsList([]);
+                log("Conectando con Google AI Studio para buscar modelos...");
+
+                try {
+                    // Petición para listar modelos disponibles para ESTA clave
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+                    const data = await res.json();
+
+                    if (data.error) throw new Error(data.error.message);
+                    
+                    // Filtramos solo los que sirven para generar texto (generateContent)
+                    const validModels = data.models
+                        .filter(m => m.supportedGenerationMethods.includes("generateContent"))
+                        .map(m => m.name.replace('models/', '')) // Limpiamos el nombre
+                        .sort(); // Ordenar alfabéticamente
+
+                    if (validModels.length === 0) throw new Error("Tu clave es válida, pero no tienes acceso a modelos de texto.");
+
+                    setModelsList(validModels);
+                    
+                    // Intentamos seleccionar el mejor por defecto (prioridad: flash > pro > cualquiera)
+                    const bestModel = validModels.find(m => m.includes('flash')) || validModels.find(m => m.includes('pro')) || validModels[0];
+                    setSelectedModel(bestModel);
+                    
+                    setConnectionStatus('success');
+                    localStorage.setItem('gemini_key_v5', apiKey);
+                    log(`¡Éxito! Se detectaron ${validModels.length} modelos disponibles.`);
+
+                } catch (err) {
+                    setConnectionStatus('error');
+                    let friendlyError = err.message;
+                    if (err.message.includes('API key not valid')) friendlyError = "La API Key es incorrecta.";
+                    setErrorMsg(friendlyError);
+                    log("Error de conexión: " + friendlyError);
+                }
+            };
+
+            // --- 2. GESTIÓN DE ARCHIVOS ---
+            const handleFile = async (e) => {
+                const f = e.target.files[0];
+                if(!f) return;
+                setFile(f);
+                setFilesInJar([]);
+                setTranslation('');
+                setFileContent('');
+                setCurrentPath(null);
+                
+                try {
+                    const zip = new JSZip();
+                    const content = await zip.loadAsync(f);
+                    const list = [];
+                    content.forEach((path, entry) => {
+                        if(!entry.dir && path.includes('/lang/') && path.endsWith('.json')) list.push(path);
+                    });
+                    setFilesInJar(list);
+                    log(`Archivo .jar leído. ${list.length} archivos de idioma encontrados.`);
+                } catch(e) { log("Error: El archivo no es un JAR/ZIP válido."); }
+            };
+
+            const loadInternalFile = async (path) => {
+                setCurrentPath(path);
+                setTranslation('');
+                try {
+                    const zip = new JSZip();
+                    const z = await zip.loadAsync(file);
+                    const text = await z.file(path).async('string');
+                    setFileContent(text);
+                } catch(e) { log("Error leyendo archivo interno."); }
+            };
+
+            // --- 3. TRADUCCIÓN ---
+            const translate = async () => {
+                if(!selectedModel) return;
+                setIsTranslating(true);
+                log(`Traduciendo usando modelo: ${selectedModel}...`);
+
+                try {
+                    const prompt = `
+                        ROLE: Minecraft Translator.
+                        TASK: Translate JSON values to Spanish (ES).
+                        CONSTRAINTS: 
+                        1. DO NOT translate keys. 
+                        2. PRESERVE formatting codes (§a, %s, <br>).
+                        3. OUTPUT: Raw JSON only.
+                        
+                        INPUT:
+                        ${fileContent}
+                    `;
+
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                    });
+                    
+                    const data = await res.json();
+                    if(data.error) throw new Error(data.error.message);
+
+                    let txt = data.candidates[0].content.parts[0].text;
+                    // Limpieza agresiva de Markdown
+                    txt = txt.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/```$/, '').trim();
+                    
+                    JSON.parse(txt); // Verificar si es JSON válido
+                    setTranslation(txt);
+                    log("Traducción completada y verificada.");
+
+                } catch(err) {
+                    log(`Fallo en traducción: ${err.message}`);
+                    alert(`Error: ${err.message}`);
+                } finally {
+                    setIsTranslating(false);
+                }
+            };
+
+            const downloadZip = async () => {
+                const zip = new JSZip();
+                const newPath = currentPath.replace('en_us', 'es_es').replace('en_uk', 'es_es'); // Intento simple de ruta
+                
+                // Si la ruta original no tenía en_us, reconstruimos
+                const finalPath = newPath === currentPath ? `assets/translated/lang/es_es.json` : newPath;
+
+                zip.file(finalPath, translation);
+                zip.file("pack.mcmeta", JSON.stringify({pack:{pack_format:15, description:"AI Translation"}}, null, 2));
+                
+                const b = await zip.generateAsync({type:"blob"});
+                const url = URL.createObjectURL(b);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Traduccion-${selectedModel}.zip`;
+                a.click();
+            };
+
+            return (
+                <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto space-y-6">
+                    
+                    {/* ENCABEZADO Y CONFIGURACIÓN */}
+                    <header className="glass p-6 rounded-2xl border-l-4 border-indigo-500 flex flex-col md:flex-row gap-6 justify-between items-start">
+                        <div>
+                            <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+                                <Icon name="satellite" className="text-indigo-400"/> JarLoc <span className="text-xs bg-indigo-600 px-2 py-1 rounded">v5 Auto-Discovery</span>
+                            </h1>
+                            <p className="text-slate-400 text-sm mt-1">Escáner de Modelos y Traductor de Mods</p>
+                        </div>
+
+                        <div className="w-full md:w-auto flex flex-col gap-3">
+                            {/* Input API Key */}
+                            <div className="flex gap-2">
+                                <input 
+                                    type="password" 
+                                    value={apiKey} 
+                                    onChange={(e) => {setApiKey(e.target.value); setConnectionStatus('idle');}}
+                                    placeholder="Pega tu Google API Key aquí" 
+                                    className="bg-slate-900 border border-slate-700 text-white text-sm rounded-lg px-4 py-2 w-full md:w-64 focus:outline-none focus:border-indigo-500"
+                                />
+                                <button 
+                                    onClick={discoverModels}
+                                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+                                >
+                                    {connectionStatus === 'loading' ? 'Escaneando...' : 'Buscar Modelos'}
+                                </button>
+                            </div>
+
+                            {/* Selector de Modelos Dinámico */}
+                            {connectionStatus === 'success' && (
+                                <div className="animate-fade-in bg-emerald-900/20 border border-emerald-500/30 p-2 rounded-lg">
+                                    <label className="text-xs text-emerald-400 font-bold block mb-1">Modelos encontrados para tu llave:</label>
+                                    <select 
+                                        value={selectedModel}
+                                        onChange={(e) => setSelectedModel(e.target.value)}
+                                        className="w-full bg-slate-900 text-white text-xs p-2 rounded border border-slate-700"
+                                    >
+                                        {modelsList.map(m => <option key={m} value={m}>{m}</option>)}
+                                    </select>
+                                </div>
+                            )}
+                            
+                            {connectionStatus === 'error' && (
+                                <div className="text-red-400 text-xs bg-red-900/20 p-2 rounded border border-red-500/30 max-w-md">
+                                    {errorMsg}
+                                </div>
+                            )}
+                        </div>
+                    </header>
+
+                    {/* ZONA DE TRABAJO */}
+                    <main className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[600px]">
+                        
+                        {/* Panel Izquierdo: Archivos */}
+                        <div className="lg:col-span-3 glass rounded-xl flex flex-col overflow-hidden">
+                            <div className="p-4 border-b border-white/5 bg-slate-800/50">
+                                <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-slate-600 rounded-lg cursor-pointer hover:border-indigo-500 hover:bg-slate-700/50 transition-all group">
+                                    <Icon name="folder-up" className="text-slate-500 group-hover:text-indigo-400 mb-2"/>
+                                    <span className="text-xs text-slate-400">Subir .JAR / .ZIP</span>
+                                    <input type="file" onChange={handleFile} className="hidden" accept=".jar,.zip"/>
+                                </label>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                                {filesInJar.map((f, i) => (
+                                    <button key={i} onClick={() => loadInternalFile(f)} 
+                                        className={`w-full text-left text-xs p-2 rounded truncate transition-colors ${currentPath === f ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}>
+                                        {f.split('/').pop()}
+                                    </button>
+                                ))}
+                                {filesInJar.length === 0 && <div className="text-center text-slate-600 text-xs mt-10">Esperando archivo...</div>}
+                            </div>
+                        </div>
+
+                        {/* Panel Central: Editor y Comparación */}
+                        <div className="lg:col-span-9 flex flex-col gap-4">
+                            {/* Barra de Herramientas */}
+                            <div className="glass p-3 rounded-lg flex justify-between items-center">
+                                <div className="text-xs text-slate-400">
+                                    {currentPath ? `Editando: ${currentPath}` : 'Selecciona un archivo de la lista'}
+                                </div>
+                                <div className="flex gap-3">
+                                    <button 
+                                        onClick={translate} 
+                                        disabled={!fileContent || isTranslating || !selectedModel}
+                                        className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-bold text-white transition-all ${
+                                            !selectedModel ? 'bg-slate-700 opacity-50 cursor-not-allowed' :
+                                            isTranslating ? 'bg-amber-600 cursor-wait' : 
+                                            'bg-gradient-to-r from-indigo-600 to-violet-600 hover:shadow-lg hover:shadow-indigo-500/20'
+                                        }`}
+                                    >
+                                        {isTranslating ? <Icon name="loader-2" className="anim-spin"/> : <Icon name="sparkles"/>}
+                                        {isTranslating ? 'Traduciendo...' : 'Traducir con IA'}
+                                    </button>
+
+                                    {translation && (
+                                        <button onClick={downloadZip} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 animate-bounce">
+                                            <Icon name="download"/> Descargar
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Editores */}
+                            <div className="flex-1 grid grid-cols-2 gap-4 min-h-0">
+                                <div className="glass rounded-xl flex flex-col overflow-hidden border-slate-700">
+                                    <div className="bg-slate-900/80 px-4 py-2 text-xs font-bold text-slate-500 border-b border-slate-700">ORIGINAL</div>
+                                    <textarea readOnly value={fileContent} className="flex-1 bg-transparent p-4 text-slate-300 resize-none outline-none code-view" placeholder="// Contenido original..."></textarea>
+                                </div>
+                                <div className="glass rounded-xl flex flex-col overflow-hidden border-indigo-500/30 relative">
+                                    <div className="bg-indigo-900/20 px-4 py-2 text-xs font-bold text-indigo-400 border-b border-indigo-500/30">TRADUCCIÓN ({selectedModel || '...'})</div>
+                                    <textarea readOnly value={translation} className="flex-1 bg-transparent p-4 text-emerald-300 resize-none outline-none code-view" placeholder="// Resultado de la IA..."></textarea>
+                                    
+                                    {isTranslating && (
+                                        <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-[2px] flex items-center justify-center flex-col gap-2">
+                                            <Icon name="cpu" className="text-indigo-400 w-10 h-10 animate-pulse"/>
+                                            <span className="text-indigo-200 text-xs">Procesando {fileContent.length} caracteres...</span>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Logs */}
+                            <div className="h-24 glass rounded-xl bg-black/40 p-2 overflow-y-auto font-mono text-[10px] text-slate-500">
+                                {logs.map((l, i) => <div key={i}>{l}</div>)}
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
