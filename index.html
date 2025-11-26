@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JarLoc v5 - Auto Discovery</title>
+    <title>JarLoc v6 - Robusto</title>
     
-    <!-- Librerías Necesarias -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://unpkg.com/json5@2/dist/index.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     
     <style>
@@ -31,14 +31,14 @@
 
     <script type="text/babel">
         const { useState, useEffect } = React;
-        const Icon = ({ name, className }) => <i data-lucide={name} className={className}></i>;
+        const Icon = ({ name, className, size }) => <i data-lucide={name} className={className} style={{fontSize: size}}></i>;
 
         const App = () => {
             // --- ESTADOS ---
             const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_key_v5') || '');
             const [modelsList, setModelsList] = useState([]);
             const [selectedModel, setSelectedModel] = useState('');
-            const [connectionStatus, setConnectionStatus] = useState('idle'); // idle, loading, success, error
+            const [connectionStatus, setConnectionStatus] = useState('idle');
             const [errorMsg, setErrorMsg] = useState('');
 
             const [file, setFile] = useState(null);
@@ -47,65 +47,51 @@
             const [fileContent, setFileContent] = useState('');
             const [translation, setTranslation] = useState('');
             const [isTranslating, setIsTranslating] = useState(false);
+            const [retryCount, setRetryCount] = useState(0); // Para reintentos automáticos
             const [logs, setLogs] = useState([]);
 
-            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [modelsList, connectionStatus, filesInJar, isTranslating]);
+            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [modelsList, connectionStatus, filesInJar, isTranslating, translation]);
 
-            const log = (msg) => setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev]);
+            const log = (msg, type='info') => setLogs(prev => [{time: new Date().toLocaleTimeString(), msg, type}, ...prev]);
 
             // --- 1. DESCUBRIMIENTO DE MODELOS ---
             const discoverModels = async () => {
                 if(!apiKey) { setErrorMsg("Por favor pega tu API Key primero"); return; }
-                
-                setConnectionStatus('loading');
-                setErrorMsg('');
-                setModelsList([]);
-                log("Conectando con Google AI Studio para buscar modelos...");
+                setConnectionStatus('loading'); setErrorMsg(''); setModelsList([]);
+                log("Buscando modelos disponibles...", 'info');
 
                 try {
-                    // Petición para listar modelos disponibles para ESTA clave
                     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
                     const data = await res.json();
-
                     if (data.error) throw new Error(data.error.message);
                     
-                    // Filtramos solo los que sirven para generar texto (generateContent)
                     const validModels = data.models
                         .filter(m => m.supportedGenerationMethods.includes("generateContent"))
-                        .map(m => m.name.replace('models/', '')) // Limpiamos el nombre
-                        .sort(); // Ordenar alfabéticamente
+                        .map(m => m.name.replace('models/', ''))
+                        .sort();
 
-                    if (validModels.length === 0) throw new Error("Tu clave es válida, pero no tienes acceso a modelos de texto.");
+                    if (validModels.length === 0) throw new Error("No tienes acceso a modelos de texto.");
 
                     setModelsList(validModels);
-                    
-                    // Intentamos seleccionar el mejor por defecto (prioridad: flash > pro > cualquiera)
-                    const bestModel = validModels.find(m => m.includes('flash')) || validModels.find(m => m.includes('pro')) || validModels[0];
+                    // Preferir modelos 'pro' para archivos largos, si están disponibles
+                    const bestModel = validModels.find(m => m.includes('pro')) || validModels.find(m => m.includes('flash')) || validModels[0];
                     setSelectedModel(bestModel);
                     
                     setConnectionStatus('success');
                     localStorage.setItem('gemini_key_v5', apiKey);
-                    log(`¡Éxito! Se detectaron ${validModels.length} modelos disponibles.`);
-
+                    log(`Conectado. ${validModels.length} modelos encontrados.`, 'success');
                 } catch (err) {
                     setConnectionStatus('error');
-                    let friendlyError = err.message;
-                    if (err.message.includes('API key not valid')) friendlyError = "La API Key es incorrecta.";
+                    let friendlyError = err.message.includes('API key not valid') ? "La API Key es incorrecta." : err.message;
                     setErrorMsg(friendlyError);
-                    log("Error de conexión: " + friendlyError);
+                    log("Error de conexión: " + friendlyError, 'error');
                 }
             };
 
             // --- 2. GESTIÓN DE ARCHIVOS ---
             const handleFile = async (e) => {
-                const f = e.target.files[0];
-                if(!f) return;
-                setFile(f);
-                setFilesInJar([]);
-                setTranslation('');
-                setFileContent('');
-                setCurrentPath(null);
-                
+                const f = e.target.files[0]; if(!f) return;
+                setFile(f); setFilesInJar([]); setTranslation(''); setFileContent(''); setCurrentPath(null);
                 try {
                     const zip = new JSZip();
                     const content = await zip.loadAsync(f);
@@ -114,152 +100,165 @@
                         if(!entry.dir && path.includes('/lang/') && path.endsWith('.json')) list.push(path);
                     });
                     setFilesInJar(list);
-                    log(`Archivo .jar leído. ${list.length} archivos de idioma encontrados.`);
-                } catch(e) { log("Error: El archivo no es un JAR/ZIP válido."); }
+                    log(`Archivo cargado. ${list.length} traducciones encontradas.`, 'info');
+                } catch(e) { log("Error: El archivo no es un JAR/ZIP válido.", 'error'); }
             };
 
             const loadInternalFile = async (path) => {
-                setCurrentPath(path);
-                setTranslation('');
+                setCurrentPath(path); setTranslation(''); setErrorMsg('');
                 try {
                     const zip = new JSZip();
                     const z = await zip.loadAsync(file);
                     const text = await z.file(path).async('string');
                     setFileContent(text);
-                } catch(e) { log("Error leyendo archivo interno."); }
+                } catch(e) { log("Error leyendo archivo interno.", 'error'); }
             };
 
-            // --- 3. TRADUCCIÓN ---
-            const translate = async () => {
-                if(!selectedModel) return;
-                setIsTranslating(true);
-                log(`Traduciendo usando modelo: ${selectedModel}...`);
+            // --- 3. TRADUCCIÓN ROBUSTA ---
+            const translate = async (isRetry = false) => {
+                if(!selectedModel || !fileContent) return;
+                setIsTranslating(true); setErrorMsg('');
+                if(!isRetry) setRetryCount(0);
+                log(`Iniciando traducción con ${selectedModel}${isRetry ? ' (Reintento)' : ''}...`, 'info');
 
                 try {
+                    // Prompt reforzado para archivos largos
                     const prompt = `
-                        ROLE: Minecraft Translator.
-                        TASK: Translate JSON values to Spanish (ES).
-                        CONSTRAINTS: 
-                        1. DO NOT translate keys. 
-                        2. PRESERVE formatting codes (§a, %s, <br>).
-                        3. OUTPUT: Raw JSON only.
+                        TASK: Translate the values of this JSON to Spanish (ES).
+                        CRITICAL RULES: 
+                        1. Output MUST be valid, parseable JSON. No markdown formatting.
+                        2. DO NOT translate keys.
+                        3. Preserve all formatting codes (§, %, <br>).
                         
-                        INPUT:
+                        INPUT JSON:
                         ${fileContent}
                     `;
 
                     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                        body: JSON.stringify({ 
+                            contents: [{ parts: [{ text: prompt }] }],
+                            // Configuración para archivos largos
+                            generationConfig: {
+                                temperature: 0.1, // Más determinista
+                                maxOutputTokens: 8192, // Máximo permitido para Flash
+                            }
+                        })
                     });
                     
                     const data = await res.json();
                     if(data.error) throw new Error(data.error.message);
+                    if(!data.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("La IA no generó respuesta (posible bloqueo de seguridad).");
 
                     let txt = data.candidates[0].content.parts[0].text;
-                    // Limpieza agresiva de Markdown
                     txt = txt.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/```$/, '').trim();
                     
-                    JSON.parse(txt); // Verificar si es JSON válido
-                    setTranslation(txt);
-                    log("Traducción completada y verificada.");
+                    // INTENTO DE REPARACIÓN AUTOMÁTICA
+                    let finalJson;
+                    try {
+                        finalJson = JSON.parse(txt); // Intento estándar
+                    } catch (parseError) {
+                        log("JSON roto detectado. Intentando reparación automática...", 'warning');
+                        try {
+                            finalJson = JSON5.parse(txt); // Intento con JSON5 (más permisivo)
+                            log("¡Reparación exitosa! El JSON se ha corregido.", 'success');
+                        } catch (json5Error) {
+                            // Si todo falla, lanzamos el error original
+                            throw parseError;
+                        }
+                    }
+
+                    setTranslation(JSON.stringify(finalJson, null, 2));
+                    log("Traducción completada correctamente.", 'success');
+                    setRetryCount(0);
 
                 } catch(err) {
-                    log(`Fallo en traducción: ${err.message}`);
-                    alert(`Error: ${err.message}`);
+                    log(`Fallo en traducción: ${err.message}`, 'error');
+                    setErrorMsg(`Error: ${err.message}. Prueba con otro modelo o un archivo más pequeño.`);
+                    
+                    // Lógica de auto-reintento simple (1 vez)
+                    if (retryCount < 1 && !err.message.includes("bloqueo")) {
+                        log("Reintentando automáticamente en 3 segundos...", 'warning');
+                        setRetryCount(prev => prev + 1);
+                        setTimeout(() => translate(true), 3000);
+                        return; // Salir para que el finally no ejecute setIsTranslating(false) aún
+                    }
+
                 } finally {
-                    setIsTranslating(false);
+                    if(retryCount === 0 || errorMsg) setIsTranslating(false);
                 }
             };
 
             const downloadZip = async () => {
-                const zip = new JSZip();
-                const newPath = currentPath.replace('en_us', 'es_es').replace('en_uk', 'es_es'); // Intento simple de ruta
-                
-                // Si la ruta original no tenía en_us, reconstruimos
-                const finalPath = newPath === currentPath ? `assets/translated/lang/es_es.json` : newPath;
+                if(!translation) return;
+                try {
+                    const zip = new JSZip();
+                    // Lógica mejorada de rutas para mods modernos (assets/modid/lang/es_es.json)
+                    const pathParts = currentPath.split('/');
+                    let newPath = currentPath;
+                    if (pathParts.length >= 3 && pathParts[0] === 'assets' && pathParts[2] === 'lang') {
+                        pathParts[pathParts.length - 1] = 'es_es.json';
+                        newPath = pathParts.join('/');
+                    } else {
+                        // Fallback genérico
+                        newPath = `assets/translated_mod/lang/es_es.json`;
+                    }
 
-                zip.file(finalPath, translation);
-                zip.file("pack.mcmeta", JSON.stringify({pack:{pack_format:15, description:"AI Translation"}}, null, 2));
-                
-                const b = await zip.generateAsync({type:"blob"});
-                const url = URL.createObjectURL(b);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `Traduccion-${selectedModel}.zip`;
-                a.click();
+                    zip.file(newPath, translation);
+                    zip.file("pack.mcmeta", JSON.stringify({pack:{pack_format:15, description:`Traducción IA por JarLoc: ${file.name}`}}, null, 2));
+                    
+                    const b = await zip.generateAsync({type:"blob"});
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(b);
+                    a.download = `JarLoc_${file.name.replace('.jar','')}_ES.zip`;
+                    a.click();
+                    log("Resource Pack descargado.", 'success');
+                } catch(e) { log("Error creando ZIP.", 'error'); }
             };
 
             return (
-                <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto space-y-6">
+                <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto space-y-6 relative">
                     
-                    {/* ENCABEZADO Y CONFIGURACIÓN */}
+                    {/* ENCABEZADO */}
                     <header className="glass p-6 rounded-2xl border-l-4 border-indigo-500 flex flex-col md:flex-row gap-6 justify-between items-start">
                         <div>
                             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-                                <Icon name="satellite" className="text-indigo-400"/> JarLoc <span className="text-xs bg-indigo-600 px-2 py-1 rounded">v5 Auto-Discovery</span>
+                                <Icon name="satellite" className="text-indigo-400"/> JarLoc <span className="text-xs bg-indigo-600 px-2 py-1 rounded">v6 Robusto</span>
                             </h1>
-                            <p className="text-slate-400 text-sm mt-1">Escáner de Modelos y Traductor de Mods</p>
+                            <p className="text-slate-400 text-sm mt-1">Traductor de Mods con Auto-Reparación de JSON</p>
                         </div>
 
                         <div className="w-full md:w-auto flex flex-col gap-3">
-                            {/* Input API Key */}
                             <div className="flex gap-2">
-                                <input 
-                                    type="password" 
-                                    value={apiKey} 
-                                    onChange={(e) => {setApiKey(e.target.value); setConnectionStatus('idle');}}
-                                    placeholder="Pega tu Google API Key aquí" 
-                                    className="bg-slate-900 border border-slate-700 text-white text-sm rounded-lg px-4 py-2 w-full md:w-64 focus:outline-none focus:border-indigo-500"
-                                />
-                                <button 
-                                    onClick={discoverModels}
-                                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
-                                >
-                                    {connectionStatus === 'loading' ? 'Escaneando...' : 'Buscar Modelos'}
+                                <input type="password" value={apiKey} onChange={(e) => {setApiKey(e.target.value); setConnectionStatus('idle');}} placeholder="Pega tu Google API Key aquí" className="bg-slate-900 border border-slate-700 text-white text-sm rounded-lg px-4 py-2 w-full md:w-64 focus:outline-none focus:border-indigo-500"/>
+                                <button onClick={discoverModels} disabled={connectionStatus === 'loading'} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap disabled:opacity-50">
+                                    {connectionStatus === 'loading' ? <Icon name="loader-2" className="anim-spin"/> : 'Conectar'}
                                 </button>
                             </div>
-
-                            {/* Selector de Modelos Dinámico */}
                             {connectionStatus === 'success' && (
-                                <div className="animate-fade-in bg-emerald-900/20 border border-emerald-500/30 p-2 rounded-lg">
-                                    <label className="text-xs text-emerald-400 font-bold block mb-1">Modelos encontrados para tu llave:</label>
-                                    <select 
-                                        value={selectedModel}
-                                        onChange={(e) => setSelectedModel(e.target.value)}
-                                        className="w-full bg-slate-900 text-white text-xs p-2 rounded border border-slate-700"
-                                    >
-                                        {modelsList.map(m => <option key={m} value={m}>{m}</option>)}
-                                    </select>
-                                </div>
+                                <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full bg-slate-900 text-white text-xs p-2 rounded border border-slate-700 animate-fade-in">
+                                    {modelsList.map(m => <option key={m} value={m}>{m}</option>)}
+                                </select>
                             )}
-                            
-                            {connectionStatus === 'error' && (
-                                <div className="text-red-400 text-xs bg-red-900/20 p-2 rounded border border-red-500/30 max-w-md">
-                                    {errorMsg}
-                                </div>
-                            )}
+                            {errorMsg && <div className="text-red-400 text-xs bg-red-900/20 p-2 rounded border border-red-500/30 max-w-md">{errorMsg}</div>}
                         </div>
                     </header>
-                    
 
                     {/* ZONA DE TRABAJO */}
                     <main className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[600px]">
-                        
                         {/* Panel Izquierdo: Archivos */}
                         <div className="lg:col-span-3 glass rounded-xl flex flex-col overflow-hidden">
-                            <div className="p-4 border-b border-white/5 bg-slate-800/50">
-                                <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-slate-600 rounded-lg cursor-pointer hover:border-indigo-500 hover:bg-slate-700/50 transition-all group">
-                                    <Icon name="folder-up" className="text-slate-500 group-hover:text-indigo-400 mb-2"/>
-                                    <span className="text-xs text-slate-400">Subir .JAR / .ZIP</span>
-                                    <input type="file" onChange={handleFile} className="hidden" accept=".jar,.zip"/>
-                                </label>
+                            <div className="p-4 border-b border-white/5 bg-slate-800/50 relative">
+                                <input type="file" onChange={handleFile} accept=".jar,.zip" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"/>
+                                <div className="flex flex-col items-center justify-center h-24 border-2 border-dashed border-slate-600 rounded-lg text-slate-500">
+                                    <Icon name="folder-up" className="mb-2"/>
+                                    <span className="text-xs">Subir .JAR / .ZIP</span>
+                                </div>
                             </div>
                             <div className="flex-1 overflow-y-auto p-2 space-y-1">
                                 {filesInJar.map((f, i) => (
-                                    <button key={i} onClick={() => loadInternalFile(f)} 
-                                        className={`w-full text-left text-xs p-2 rounded truncate transition-colors ${currentPath === f ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}>
+                                    <button key={i} onClick={() => loadInternalFile(f)} className={`w-full text-left text-xs p-2 rounded truncate transition-colors ${currentPath === f ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}>
                                         {f.split('/').pop()}
                                     </button>
                                 ))}
@@ -267,63 +266,49 @@
                             </div>
                         </div>
 
-                        {/* Panel Central: Editor y Comparación */}
+                        {/* Panel Central */}
                         <div className="lg:col-span-9 flex flex-col gap-4">
-                            {/* Barra de Herramientas */}
                             <div className="glass p-3 rounded-lg flex justify-between items-center">
-                                <div className="text-xs text-slate-400">
-                                    {currentPath ? `Editando: ${currentPath}` : 'Selecciona un archivo de la lista'}
-                                </div>
+                                <div className="text-xs text-slate-400 truncate max-w-[50%]">{currentPath || 'Selecciona un archivo'}</div>
                                 <div className="flex gap-3">
-                                    <button 
-                                        onClick={translate} 
-                                        disabled={!fileContent || isTranslating || !selectedModel}
-                                        className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-bold text-white transition-all ${
-                                            !selectedModel ? 'bg-slate-700 opacity-50 cursor-not-allowed' :
-                                            isTranslating ? 'bg-amber-600 cursor-wait' : 
-                                            'bg-gradient-to-r from-indigo-600 to-violet-600 hover:shadow-lg hover:shadow-indigo-500/20'
-                                        }`}
-                                    >
+                                    <button onClick={() => translate(false)} disabled={!fileContent || isTranslating || !selectedModel} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-bold text-white transition-all ${!selectedModel || !fileContent ? 'bg-slate-700 opacity-50 cursor-not-allowed' : isTranslating ? 'bg-amber-600 cursor-wait' : 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:shadow-lg'}`}>
                                         {isTranslating ? <Icon name="loader-2" className="anim-spin"/> : <Icon name="sparkles"/>}
-                                        {isTranslating ? 'Traduciendo...' : 'Traducir con IA'}
+                                        {isTranslating ? (retryCount > 0 ? 'Reintentando...' : 'Traduciendo...') : 'Traducir con IA'}
                                     </button>
-
                                     {translation && (
                                         <button onClick={downloadZip} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 animate-bounce">
-                                            <Icon name="download"/> Descargar
+                                            <Icon name="download"/> Descargar ZIP
                                         </button>
                                     )}
                                 </div>
                             </div>
 
-                            {/* Editores */}
                             <div className="flex-1 grid grid-cols-2 gap-4 min-h-0">
                                 <div className="glass rounded-xl flex flex-col overflow-hidden border-slate-700">
-                                    <div className="bg-slate-900/80 px-4 py-2 text-xs font-bold text-slate-500 border-b border-slate-700">ORIGINAL</div>
+                                    <div className="bg-slate-900/80 px-4 py-2 text-xs font-bold text-slate-500 border-b border-slate-700">ORIGINAL ({fileContent.length} chars)</div>
                                     <textarea readOnly value={fileContent} className="flex-1 bg-transparent p-4 text-slate-300 resize-none outline-none code-view" placeholder="// Contenido original..."></textarea>
                                 </div>
-                                <div className="glass rounded-xl flex flex-col overflow-hidden border-indigo-500/30 relative">
-                                    <div className="bg-indigo-900/20 px-4 py-2 text-xs font-bold text-indigo-400 border-b border-indigo-500/30">TRADUCCIÓN ({selectedModel || '...'})</div>
-                                    <textarea readOnly value={translation} className="flex-1 bg-transparent p-4 text-emerald-300 resize-none outline-none code-view" placeholder="// Resultado de la IA..."></textarea>
-                                    
+                                <div className={`glass rounded-xl flex flex-col overflow-hidden relative ${errorMsg ? 'border-red-500/50' : 'border-indigo-500/30'}`}>
+                                    <div className={`px-4 py-2 text-xs font-bold border-b ${errorMsg ? 'bg-red-900/20 text-red-400 border-red-500/30' : 'bg-indigo-900/20 text-indigo-400 border-indigo-500/30'}`}>TRADUCCIÓN {selectedModel ? `(${selectedModel})` : ''}</div>
+                                    <textarea readOnly value={translation} className={`flex-1 bg-transparent p-4 resize-none outline-none code-view ${errorMsg ? 'text-red-300' : 'text-emerald-300'}`} placeholder="// Resultado de la IA..."></textarea>
                                     {isTranslating && (
-                                        <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-[2px] flex items-center justify-center flex-col gap-2">
-                                            <Icon name="cpu" className="text-indigo-400 w-10 h-10 animate-pulse"/>
-                                            <span className="text-indigo-200 text-xs">Procesando {fileContent.length} caracteres...</span>
+                                        <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-[2px] flex items-center justify-center flex-col gap-2">
+                                            <Icon name="cpu" className="text-indigo-400 w-10 h-10 anim-spin"/>
+                                            <span className="text-indigo-200 text-xs">{retryCount > 0 ? 'Reintentando automáticamente...' : 'Procesando archivo grande...'}</span>
                                         </div>
                                     )}
                                 </div>
                             </div>
 
-                            {/* Logs */}
-                            <div className="h-24 glass rounded-xl bg-black/40 p-2 overflow-y-auto font-mono text-[10px] text-slate-500">
-                                {logs.map((l, i) => <div key={i}>{l}</div>)}
+                            <div className="h-24 glass rounded-xl bg-black/40 p-2 overflow-y-auto font-mono text-[10px] flex flex-col-reverse">
+                                {logs.map((l, i) => <div key={i} className={l.type === 'error' ? 'text-red-400' : l.type === 'warning' ? 'text-amber-400' : l.type === 'success' ? 'text-emerald-400' : 'text-slate-500'}>[{l.time}] {l.msg}</div>)}
                             </div>
                         </div>
                     </main>
-                    {/* BOTE DE PROPINAS V3 (POSICIÓN INFERIOR FIJA) */}
+
+                    {/* BOTE DE PROPINAS - ENLACE CORREGIDO */}
                     <div className="fixed bottom-6 right-6 z-50">
-                        <a href="https://ko-fi.com/foboz" target="_blank" className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white px-5 py-3 rounded-full font-bold shadow-lg transition-all hover:scale-105 hover:shadow-rose-500/25 text-sm group">
+                        <a href="[https://ko-fi.com/foboz](https://ko-fi.com/foboz)" target="_blank" className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white px-5 py-3 rounded-full font-bold shadow-lg transition-all hover:scale-105 hover:shadow-rose-500/25 text-sm group">
                             <Icon name="coffee" className="text-white group-hover:animate-bounce" size={20}/>
                             Invítame un café
                         </a>
@@ -334,8 +319,10 @@
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
-
     </script>
+</body>
+</html>
+
 
 
 
