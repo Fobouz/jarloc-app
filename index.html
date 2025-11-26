@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JarLoc v6 - Robusto</title>
+    <title>JarLoc v7 - Estable</title>
     
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -11,7 +11,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://unpkg.com/json5@2/dist/index.min.js"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
     
     <style>
         body { background-color: #020617; color: #e2e8f0; font-family: 'Segoe UI', system-ui, sans-serif; }
@@ -24,6 +24,8 @@
         .code-view { font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 0.8rem; }
         .anim-spin { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        /* Fix para iconos */
+        .lucide { display: inline-block; vertical-align: middle; }
     </style>
 </head>
 <body>
@@ -31,7 +33,26 @@
 
     <script type="text/babel">
         const { useState, useEffect } = React;
-        const Icon = ({ name, className, size }) => <i data-lucide={name} className={className} style={{fontSize: size}}></i>;
+
+        // --- COMPONENTE DE ICONO CORREGIDO (V7) ---
+        // Esta nueva versión evita el conflicto "removeChild" entre React y Lucide
+        const Icon = ({ name, className = "", size = 24 }) => {
+            const iconName = name.toLowerCase().replace(/-([a-z])/g, (g) => g[1].toUpperCase()); // kebab-case to camelCase
+            if (!window.lucide || !window.lucide.icons || !window.lucide.icons[iconName]) {
+                return null; // Evita crash si el icono no existe
+            }
+            
+            // Generamos el SVG como un string y dejamos que React lo inyecte de forma segura
+            const svgString = window.lucide.icons[iconName].toSvg({
+                'class': `lucide lucide-${name} ${className}`,
+                'width': size,
+                'height': size,
+                'stroke-width': 2
+            });
+
+            return <span dangerouslySetInnerHTML={{ __html: svgString }} />;
+        };
+        // -------------------------------------------
 
         const App = () => {
             // --- ESTADOS ---
@@ -47,10 +68,11 @@
             const [fileContent, setFileContent] = useState('');
             const [translation, setTranslation] = useState('');
             const [isTranslating, setIsTranslating] = useState(false);
-            const [retryCount, setRetryCount] = useState(0); // Para reintentos automáticos
+            const [retryCount, setRetryCount] = useState(0);
             const [logs, setLogs] = useState([]);
 
-            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [modelsList, connectionStatus, filesInJar, isTranslating, translation]);
+            // NOTA V7: Hemos eliminado el useEffect que llamaba a lucide.createIcons()
+            // ya que ahora lo manejamos directamente en el componente Icon.
 
             const log = (msg, type='info') => setLogs(prev => [{time: new Date().toLocaleTimeString(), msg, type}, ...prev]);
 
@@ -73,7 +95,6 @@
                     if (validModels.length === 0) throw new Error("No tienes acceso a modelos de texto.");
 
                     setModelsList(validModels);
-                    // Preferir modelos 'pro' para archivos largos, si están disponibles
                     const bestModel = validModels.find(m => m.includes('pro')) || validModels.find(m => m.includes('flash')) || validModels[0];
                     setSelectedModel(bestModel);
                     
@@ -122,7 +143,6 @@
                 log(`Iniciando traducción con ${selectedModel}${isRetry ? ' (Reintento)' : ''}...`, 'info');
 
                 try {
-                    // Prompt reforzado para archivos largos
                     const prompt = `
                         TASK: Translate the values of this JSON to Spanish (ES).
                         CRITICAL RULES: 
@@ -139,10 +159,9 @@
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ 
                             contents: [{ parts: [{ text: prompt }] }],
-                            // Configuración para archivos largos
                             generationConfig: {
-                                temperature: 0.1, // Más determinista
-                                maxOutputTokens: 8192, // Máximo permitido para Flash
+                                temperature: 0.1,
+                                maxOutputTokens: 8192,
                             }
                         })
                     });
@@ -154,17 +173,15 @@
                     let txt = data.candidates[0].content.parts[0].text;
                     txt = txt.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/```$/, '').trim();
                     
-                    // INTENTO DE REPARACIÓN AUTOMÁTICA
                     let finalJson;
                     try {
-                        finalJson = JSON.parse(txt); // Intento estándar
+                        finalJson = JSON.parse(txt);
                     } catch (parseError) {
                         log("JSON roto detectado. Intentando reparación automática...", 'warning');
                         try {
-                            finalJson = JSON5.parse(txt); // Intento con JSON5 (más permisivo)
+                            finalJson = JSON5.parse(txt);
                             log("¡Reparación exitosa! El JSON se ha corregido.", 'success');
                         } catch (json5Error) {
-                            // Si todo falla, lanzamos el error original
                             throw parseError;
                         }
                     }
@@ -177,12 +194,11 @@
                     log(`Fallo en traducción: ${err.message}`, 'error');
                     setErrorMsg(`Error: ${err.message}. Prueba con otro modelo o un archivo más pequeño.`);
                     
-                    // Lógica de auto-reintento simple (1 vez)
                     if (retryCount < 1 && !err.message.includes("bloqueo")) {
                         log("Reintentando automáticamente en 3 segundos...", 'warning');
                         setRetryCount(prev => prev + 1);
                         setTimeout(() => translate(true), 3000);
-                        return; // Salir para que el finally no ejecute setIsTranslating(false) aún
+                        return;
                     }
 
                 } finally {
@@ -194,14 +210,12 @@
                 if(!translation) return;
                 try {
                     const zip = new JSZip();
-                    // Lógica mejorada de rutas para mods modernos (assets/modid/lang/es_es.json)
                     const pathParts = currentPath.split('/');
                     let newPath = currentPath;
                     if (pathParts.length >= 3 && pathParts[0] === 'assets' && pathParts[2] === 'lang') {
                         pathParts[pathParts.length - 1] = 'es_es.json';
                         newPath = pathParts.join('/');
                     } else {
-                        // Fallback genérico
                         newPath = `assets/translated_mod/lang/es_es.json`;
                     }
 
@@ -224,7 +238,7 @@
                     <header className="glass p-6 rounded-2xl border-l-4 border-indigo-500 flex flex-col md:flex-row gap-6 justify-between items-start">
                         <div>
                             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-                                <Icon name="satellite" className="text-indigo-400"/> JarLoc <span className="text-xs bg-indigo-600 px-2 py-1 rounded">v6 Robusto</span>
+                                <Icon name="satellite" className="text-indigo-400"/> JarLoc <span className="text-xs bg-indigo-600 px-2 py-1 rounded">v7 Estable</span>
                             </h1>
                             <p className="text-slate-400 text-sm mt-1">Traductor de Mods con Auto-Reparación de JSON</p>
                         </div>
@@ -322,7 +336,6 @@
     </script>
 </body>
 </html>
-
 
 
 
