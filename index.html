@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JarLoc v7 - Estable</title>
+    <title>JarLoc v7 - Reparador Inteligente</title>
     
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -24,7 +24,6 @@
         .code-view { font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 0.8rem; }
         .anim-spin { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        /* Fix para iconos */
         .lucide { display: inline-block; vertical-align: middle; }
     </style>
 </head>
@@ -32,30 +31,19 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
 
-        // --- COMPONENTE DE ICONO CORREGIDO (V7) ---
-        // Esta nueva versión evita el conflicto "removeChild" entre React y Lucide
         const Icon = ({ name, className = "", size = 24 }) => {
-            const iconName = name.toLowerCase().replace(/-([a-z])/g, (g) => g[1].toUpperCase()); // kebab-case to camelCase
-            if (!window.lucide || !window.lucide.icons || !window.lucide.icons[iconName]) {
-                return null; // Evita crash si el icono no existe
-            }
-            
-            // Generamos el SVG como un string y dejamos que React lo inyecte de forma segura
+            const iconName = name.toLowerCase().replace(/-([a-z])/g, (g) => g[1].toUpperCase());
+            if (!window.lucide || !window.lucide.icons || !window.lucide.icons[iconName]) return null;
             const svgString = window.lucide.icons[iconName].toSvg({
                 'class': `lucide lucide-${name} ${className}`,
-                'width': size,
-                'height': size,
-                'stroke-width': 2
+                'width': size, 'height': size, 'stroke-width': 2
             });
-
             return <span dangerouslySetInnerHTML={{ __html: svgString }} />;
         };
-        // -------------------------------------------
 
         const App = () => {
-            // --- ESTADOS ---
             const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_key_v5') || '');
             const [modelsList, setModelsList] = useState([]);
             const [selectedModel, setSelectedModel] = useState('');
@@ -68,11 +56,10 @@
             const [fileContent, setFileContent] = useState('');
             const [translation, setTranslation] = useState('');
             const [isTranslating, setIsTranslating] = useState(false);
-            const [retryCount, setRetryCount] = useState(0);
             const [logs, setLogs] = useState([]);
+            const logEndRef = useRef(null);
 
-            // NOTA V7: Hemos eliminado el useEffect que llamaba a lucide.createIcons()
-            // ya que ahora lo manejamos directamente en el componente Icon.
+            useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
 
             const log = (msg, type='info') => setLogs(prev => [{time: new Date().toLocaleTimeString(), msg, type}, ...prev]);
 
@@ -135,12 +122,11 @@
                 } catch(e) { log("Error leyendo archivo interno.", 'error'); }
             };
 
-            // --- 3. TRADUCCIÓN ROBUSTA ---
-            const translate = async (isRetry = false) => {
+            // --- 3. TRADUCCIÓN INTELIGENTE (NUEVO LÓGICA) ---
+            const translate = async () => {
                 if(!selectedModel || !fileContent) return;
                 setIsTranslating(true); setErrorMsg('');
-                if(!isRetry) setRetryCount(0);
-                log(`Iniciando traducción con ${selectedModel}${isRetry ? ' (Reintento)' : ''}...`, 'info');
+                log(`Iniciando traducción con ${selectedModel}...`, 'info');
 
                 try {
                     const prompt = `
@@ -171,38 +157,49 @@
                     if(!data.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("La IA no generó respuesta (posible bloqueo de seguridad).");
 
                     let txt = data.candidates[0].content.parts[0].text;
+                    // Limpieza básica
                     txt = txt.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/```$/, '').trim();
                     
                     let finalJson;
                     try {
+                        // Intento 1: Parseo Estándar
                         finalJson = JSON.parse(txt);
                     } catch (parseError) {
-                        log("JSON roto detectado. Intentando reparación automática...", 'warning');
+                        log(`JSON roto: ${parseError.message}. Intentando reparación inteligente...`, 'warning');
+                        
                         try {
+                            // Intento 2: JSON5 (Permisivo)
                             finalJson = JSON5.parse(txt);
-                            log("¡Reparación exitosa! El JSON se ha corregido.", 'success');
+                            log("¡Reparación exitosa con JSON5!", 'success');
                         } catch (json5Error) {
-                            throw parseError;
+                            log("JSON5 falló. Intentando parcheado quirúrgico...", 'warning');
+                            
+                            // Intento 3: Parcheado Quirúrgico (para cadenas no terminadas)
+                            let patchedTxt = txt;
+                            // Si termina abruptamente, intentamos cerrar comillas y llave
+                            if (!patchedTxt.endsWith('}')) {
+                                if (!patchedTxt.trim().endsWith('"')) patchedTxt += '"';
+                                patchedTxt += "\n}";
+                            }
+                            
+                            try {
+                                finalJson = JSON5.parse(patchedTxt);
+                                log("¡Reparación exitosa mediante parcheado!", 'success');
+                            } catch (patchError) {
+                                // Si todo falla, lanzamos el error original y NO reintentamos la API
+                                throw new Error("No se pudo reparar la respuesta de la IA. El archivo puede ser demasiado grande.");
+                            }
                         }
                     }
 
                     setTranslation(JSON.stringify(finalJson, null, 2));
                     log("Traducción completada correctamente.", 'success');
-                    setRetryCount(0);
 
                 } catch(err) {
-                    log(`Fallo en traducción: ${err.message}`, 'error');
-                    setErrorMsg(`Error: ${err.message}. Prueba con otro modelo o un archivo más pequeño.`);
-                    
-                    if (retryCount < 1 && !err.message.includes("bloqueo")) {
-                        log("Reintentando automáticamente en 3 segundos...", 'warning');
-                        setRetryCount(prev => prev + 1);
-                        setTimeout(() => translate(true), 3000);
-                        return;
-                    }
-
+                    log(`Fallo crítico en traducción: ${err.message}`, 'error');
+                    setErrorMsg(`Error: ${err.message}.`);
                 } finally {
-                    if(retryCount === 0 || errorMsg) setIsTranslating(false);
+                    setIsTranslating(false);
                 }
             };
 
@@ -238,9 +235,9 @@
                     <header className="glass p-6 rounded-2xl border-l-4 border-indigo-500 flex flex-col md:flex-row gap-6 justify-between items-start">
                         <div>
                             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-                                <Icon name="satellite" className="text-indigo-400"/> JarLoc <span className="text-xs bg-indigo-600 px-2 py-1 rounded">v7 Estable</span>
+                                <Icon name="satellite" className="text-indigo-400"/> JarLoc <span className="text-xs bg-indigo-600 px-2 py-1 rounded">v7 Reparador</span>
                             </h1>
-                            <p className="text-slate-400 text-sm mt-1">Traductor de Mods con Auto-Reparación de JSON</p>
+                            <p className="text-slate-400 text-sm mt-1">Traductor Inteligente con Auto-Reparación</p>
                         </div>
 
                         <div className="w-full md:w-auto flex flex-col gap-3">
@@ -285,9 +282,9 @@
                             <div className="glass p-3 rounded-lg flex justify-between items-center">
                                 <div className="text-xs text-slate-400 truncate max-w-[50%]">{currentPath || 'Selecciona un archivo'}</div>
                                 <div className="flex gap-3">
-                                    <button onClick={() => translate(false)} disabled={!fileContent || isTranslating || !selectedModel} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-bold text-white transition-all ${!selectedModel || !fileContent ? 'bg-slate-700 opacity-50 cursor-not-allowed' : isTranslating ? 'bg-amber-600 cursor-wait' : 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:shadow-lg'}`}>
+                                    <button onClick={() => translate()} disabled={!fileContent || isTranslating || !selectedModel} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-bold text-white transition-all ${!selectedModel || !fileContent ? 'bg-slate-700 opacity-50 cursor-not-allowed' : isTranslating ? 'bg-amber-600 cursor-wait' : 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:shadow-lg'}`}>
                                         {isTranslating ? <Icon name="loader-2" className="anim-spin"/> : <Icon name="sparkles"/>}
-                                        {isTranslating ? (retryCount > 0 ? 'Reintentando...' : 'Traduciendo...') : 'Traducir con IA'}
+                                        {isTranslating ? 'Traduciendo...' : 'Traducir con IA'}
                                     </button>
                                     {translation && (
                                         <button onClick={downloadZip} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 animate-bounce">
@@ -308,7 +305,7 @@
                                     {isTranslating && (
                                         <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-[2px] flex items-center justify-center flex-col gap-2">
                                             <Icon name="cpu" className="text-indigo-400 w-10 h-10 anim-spin"/>
-                                            <span className="text-indigo-200 text-xs">{retryCount > 0 ? 'Reintentando automáticamente...' : 'Procesando archivo grande...'}</span>
+                                            <span className="text-indigo-200 text-xs">Procesando archivo grande...</span>
                                         </div>
                                     )}
                                 </div>
@@ -316,11 +313,12 @@
 
                             <div className="h-24 glass rounded-xl bg-black/40 p-2 overflow-y-auto font-mono text-[10px] flex flex-col-reverse">
                                 {logs.map((l, i) => <div key={i} className={l.type === 'error' ? 'text-red-400' : l.type === 'warning' ? 'text-amber-400' : l.type === 'success' ? 'text-emerald-400' : 'text-slate-500'}>[{l.time}] {l.msg}</div>)}
+                                <div ref={logEndRef} />
                             </div>
                         </div>
                     </main>
 
-                    {/* BOTE DE PROPINAS - ENLACE CORREGIDO */}
+                    {/* BOTE DE PROPINAS */}
                     <div className="fixed bottom-6 right-6 z-50">
                         <a href="[https://ko-fi.com/foboz](https://ko-fi.com/foboz)" target="_blank" className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white px-5 py-3 rounded-full font-bold shadow-lg transition-all hover:scale-105 hover:shadow-rose-500/25 text-sm group">
                             <Icon name="coffee" className="text-white group-hover:animate-bounce" size={20}/>
