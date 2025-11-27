@@ -3,8 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JarLoc</title>
-    <link rel="icon" type="image/png" href="https://i.imgur.com/jYBfWdX.png">
+    <title>JarLoc v0.009 - Beta</title>
     
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -13,6 +12,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://unpkg.com/json5@2/dist/index.min.js"></script>
     <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
+    <link rel="icon" type="image/png" href="https://i.imgur.com/jYBfWdX.png">
     
     <style>
         body { background-color: #020617; color: #e2e8f0; font-family: 'Segoe UI', system-ui, sans-serif; }
@@ -123,7 +123,7 @@
                 } catch(e) { log("Error leyendo archivo interno.", 'error'); }
             };
 
-            // --- 3. TRADUCCIÓN INTELIGENTE (NUEVO LÓGICA) ---
+            // --- 3. TRADUCCIÓN INTELIGENTE ---
             const translate = async () => {
                 if(!selectedModel || !fileContent) return;
                 setIsTranslating(true); setErrorMsg('');
@@ -158,37 +158,28 @@
                     if(!data.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("La IA no generó respuesta (posible bloqueo de seguridad).");
 
                     let txt = data.candidates[0].content.parts[0].text;
-                    // Limpieza básica
                     txt = txt.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/```$/, '').trim();
                     
                     let finalJson;
                     try {
-                        // Intento 1: Parseo Estándar
                         finalJson = JSON.parse(txt);
                     } catch (parseError) {
                         log(`JSON roto: ${parseError.message}. Intentando reparación inteligente...`, 'warning');
-                        
                         try {
-                            // Intento 2: JSON5 (Permisivo)
                             finalJson = JSON5.parse(txt);
                             log("¡Reparación exitosa con JSON5!", 'success');
                         } catch (json5Error) {
                             log("JSON5 falló. Intentando parcheado quirúrgico...", 'warning');
-                            
-                            // Intento 3: Parcheado Quirúrgico (para cadenas no terminadas)
                             let patchedTxt = txt;
-                            // Si termina abruptamente, intentamos cerrar comillas y llave
                             if (!patchedTxt.endsWith('}')) {
                                 if (!patchedTxt.trim().endsWith('"')) patchedTxt += '"';
                                 patchedTxt += "\n}";
                             }
-                            
                             try {
                                 finalJson = JSON5.parse(patchedTxt);
                                 log("¡Reparación exitosa mediante parcheado!", 'success');
                             } catch (patchError) {
-                                // Si todo falla, lanzamos el error original y NO reintentamos la API
-                                throw new Error("No se pudo reparar la respuesta de la IA. El archivo puede ser demasiado grande.");
+                                throw new Error("La IA cortó la respuesta y no se pudo reparar. El archivo es demasiado grande para este modelo.");
                             }
                         }
                     }
@@ -197,8 +188,17 @@
                     log("Traducción completada correctamente.", 'success');
 
                 } catch(err) {
-                    log(`Fallo crítico en traducción: ${err.message}`, 'error');
-                    setErrorMsg(`Error: ${err.message}.`);
+                    console.error(err);
+                    log(`Fallo crítico: La IA entregó un formato inválido.`, 'error');
+                    
+                    // Mensaje de ayuda en la cabecera superior (rojo)
+                    if (err.message.includes("JSON") && fileContent.length > 10000 && selectedModel.includes('flash')) {
+                         setErrorMsg("Error: El archivo es muy grande y el modelo 'Flash' falló al generar el JSON. Por favor, selecciona un modelo 'Pro' en la lista.");
+                    } else {
+                         setErrorMsg(`Error: ${err.message}. Intenta de nuevo o cambia de modelo.`);
+                    }
+                    // IMPORTANTE: YA NO HAY ALERT() AQUÍ.
+
                 } finally {
                     setIsTranslating(false);
                 }
@@ -232,11 +232,11 @@
             return (
                 <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto space-y-6 relative">
                     
-                    {/* ENCABEZADO */}
+                    {/* ENCABEZADO AHORA CON v0.009 */}
                     <header className="glass p-6 rounded-2xl border-l-4 border-indigo-500 flex flex-col md:flex-row gap-6 justify-between items-start">
                         <div>
                             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-                                <Icon name="satellite" className="text-indigo-400"/> JarLoc <span className="text-xs bg-indigo-600 px-2 py-1 rounded">v0.07</span>
+                                <Icon name="satellite" className="text-indigo-400"/> JarLoc <span className="text-xs bg-indigo-600 px-2 py-1 rounded">v0.009 Beta</span>
                             </h1>
                             <p className="text-slate-400 text-sm mt-1">Traductor Inteligente con Auto-Reparación</p>
                         </div>
@@ -253,7 +253,7 @@
                                     {modelsList.map(m => <option key={m} value={m}>{m}</option>)}
                                 </select>
                             )}
-                            {errorMsg && <div className="text-red-400 text-xs bg-red-900/20 p-2 rounded border border-red-500/30 max-w-md">{errorMsg}</div>}
+                            {errorMsg && <div className="text-red-400 text-xs bg-red-900/20 p-2 rounded border border-red-500/30 max-w-md animate-pulse">{errorMsg}</div>}
                         </div>
                     </header>
 
@@ -321,7 +321,7 @@
 
                     {/* BOTE DE PROPINAS */}
                     <div className="fixed bottom-6 right-6 z-50">
-                        <a href="https://ko-fi.com/foboz" target="_blank" className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white px-5 py-3 rounded-full font-bold shadow-lg transition-all hover:scale-105 hover:shadow-rose-500/25 text-sm group">
+                        <a href="[https://ko-fi.com/foboz](https://ko-fi.com/foboz)" target="_blank" className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white px-5 py-3 rounded-full font-bold shadow-lg transition-all hover:scale-105 hover:shadow-rose-500/25 text-sm group">
                             <Icon name="coffee" className="text-white group-hover:animate-bounce" size={20}/>
                             Invítame un café
                         </a>
@@ -335,6 +335,7 @@
     </script>
 </body>
 </html>
+
 
 
 
