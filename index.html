@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JarLoc - Beta</title>
+    <title>JarLoc v0.10 - Beta</title>
     
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -34,6 +34,18 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
+        // Lista de idiomas soportados
+        const LANGUAGES = [
+            { code: 'es', name: 'Español' },
+            { code: 'en', name: 'English' },
+            { code: 'pt', name: 'Português' },
+            { code: 'fr', name: 'Français' },
+            { code: 'de', name: 'Deutsch' },
+            { code: 'it', name: 'Italiano' },
+            { code: 'ru', name: 'Русский' },
+            { code: 'zh', name: '简体中文' }
+        ];
+
         const Icon = ({ name, className = "", size = 24 }) => {
             const iconName = name.toLowerCase().replace(/-([a-z])/g, (g) => g[1].toUpperCase());
             if (!window.lucide || !window.lucide.icons || !window.lucide.icons[iconName]) return null;
@@ -48,6 +60,8 @@
             const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_key_v5') || '');
             const [modelsList, setModelsList] = useState([]);
             const [selectedModel, setSelectedModel] = useState('');
+            // Nuevo estado para el idioma objetivo
+            const [targetLang, setTargetLang] = useState('es');
             const [connectionStatus, setConnectionStatus] = useState('idle');
             const [errorMsg, setErrorMsg] = useState('');
 
@@ -127,11 +141,14 @@
             const translate = async () => {
                 if(!selectedModel || !fileContent) return;
                 setIsTranslating(true); setErrorMsg('');
-                log(`Iniciando traducción con ${selectedModel}...`, 'info');
+                // Obtenemos el nombre legible del idioma para el log
+                const langName = LANGUAGES.find(l => l.code === targetLang)?.name || targetLang;
+                log(`Iniciando traducción a ${langName} con ${selectedModel}...`, 'info');
 
                 try {
+                    // Prompt actualizado con el idioma seleccionado
                     const prompt = `
-                        TASK: Translate the values of this JSON to Spanish (ES).
+                        TASK: Translate the values of this JSON to target language code: "${targetLang}".
                         CRITICAL RULES: 
                         1. Output MUST be valid, parseable JSON. No markdown formatting.
                         2. DO NOT translate keys.
@@ -191,13 +208,11 @@
                     console.error(err);
                     log(`Fallo crítico: La IA entregó un formato inválido.`, 'error');
                     
-                    // Mensaje de ayuda en la cabecera superior (rojo)
                     if (err.message.includes("JSON") && fileContent.length > 10000 && selectedModel.includes('flash')) {
                          setErrorMsg("Error: El archivo es muy grande y el modelo 'Flash' falló al generar el JSON. Por favor, selecciona un modelo 'Pro' en la lista.");
                     } else {
                          setErrorMsg(`Error: ${err.message}. Intenta de nuevo o cambia de modelo.`);
                     }
-                    // IMPORTANTE: YA NO HAY ALERT() AQUÍ.
 
                 } finally {
                     setIsTranslating(false);
@@ -210,20 +225,23 @@
                     const zip = new JSZip();
                     const pathParts = currentPath.split('/');
                     let newPath = currentPath;
+                    // Usamos el código del idioma seleccionado para el nombre del archivo (ej: fr_fr.json)
+                    const langFileName = `${targetLang}_${targetLang}.json`;
+
                     if (pathParts.length >= 3 && pathParts[0] === 'assets' && pathParts[2] === 'lang') {
-                        pathParts[pathParts.length - 1] = 'es_es.json';
+                        pathParts[pathParts.length - 1] = langFileName;
                         newPath = pathParts.join('/');
                     } else {
-                        newPath = `assets/translated_mod/lang/es_es.json`;
+                        newPath = `assets/translated_mod/lang/${langFileName}`;
                     }
 
                     zip.file(newPath, translation);
-                    zip.file("pack.mcmeta", JSON.stringify({pack:{pack_format:15, description:`Traducción IA por JarLoc: ${file.name}`}}, null, 2));
+                    zip.file("pack.mcmeta", JSON.stringify({pack:{pack_format:15, description:`Traducción IA (${targetLang}) por JarLoc: ${file.name}`}}, null, 2));
                     
                     const b = await zip.generateAsync({type:"blob"});
                     const a = document.createElement('a');
                     a.href = URL.createObjectURL(b);
-                    a.download = `JarLoc_${file.name.replace('.jar','')}_ES.zip`;
+                    a.download = `JarLoc_${file.name.replace('.jar','')}_${targetLang.toUpperCase()}.zip`;
                     a.click();
                     log("Resource Pack descargado.", 'success');
                 } catch(e) { log("Error creando ZIP.", 'error'); }
@@ -232,13 +250,13 @@
             return (
                 <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto space-y-6 relative">
                     
-                    {/* ENCABEZADO AHORA CON v0.009 */}
+                    {/* ENCABEZADO AHORA CON v0.10 */}
                     <header className="glass p-6 rounded-2xl border-l-4 border-indigo-500 flex flex-col md:flex-row gap-6 justify-between items-start">
                         <div>
                             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-                                <Icon name="satellite" className="text-indigo-400"/> JarLoc <span className="text-xs bg-indigo-600 px-2 py-1 rounded">v0.09 Beta</span>
+                                <Icon name="satellite" className="text-indigo-400"/> JarLoc <span className="text-xs bg-indigo-600 px-2 py-1 rounded">v0.10 Beta</span>
                             </h1>
-                            <p className="text-slate-400 text-sm mt-1">Traductor Inteligente con Auto-Reparación</p>
+                            <p className="text-slate-400 text-sm mt-1">Traductor Inteligente Multi-Idioma</p>
                         </div>
 
                         <div className="w-full md:w-auto flex flex-col gap-3">
@@ -248,11 +266,19 @@
                                     {connectionStatus === 'loading' ? <Icon name="loader-2" className="anim-spin"/> : 'Conectar'}
                                 </button>
                             </div>
-                            {connectionStatus === 'success' && (
-                                <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full bg-slate-900 text-white text-xs p-2 rounded border border-slate-700 animate-fade-in">
-                                    {modelsList.map(m => <option key={m} value={m}>{m}</option>)}
+                            
+                            {/* NUEVO: SELECTOR DE IDIOMA */}
+                            <div className="flex gap-2">
+                                {connectionStatus === 'success' && (
+                                    <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="flex-1 bg-slate-900 text-white text-xs p-2 rounded border border-slate-700 animate-fade-in" title="Seleccionar Modelo IA">
+                                        {modelsList.map(m => <option key={m} value={m}>{m}</option>)}
+                                    </select>
+                                )}
+                                <select value={targetLang} onChange={(e) => setTargetLang(e.target.value)} className="w-32 bg-slate-900 text-white text-xs p-2 rounded border border-slate-700 animate-fade-in font-bold text-indigo-300" title="Idioma de destino">
+                                    {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
                                 </select>
-                            )}
+                            </div>
+
                             {errorMsg && <div className="text-red-400 text-xs bg-red-900/20 p-2 rounded border border-red-500/30 max-w-md animate-pulse">{errorMsg}</div>}
                         </div>
                     </header>
@@ -285,7 +311,7 @@
                                 <div className="flex gap-3">
                                     <button onClick={() => translate()} disabled={!fileContent || isTranslating || !selectedModel} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-bold text-white transition-all ${!selectedModel || !fileContent ? 'bg-slate-700 opacity-50 cursor-not-allowed' : isTranslating ? 'bg-amber-600 cursor-wait' : 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:shadow-lg'}`}>
                                         {isTranslating ? <Icon name="loader-2" className="anim-spin"/> : <Icon name="sparkles"/>}
-                                        {isTranslating ? 'Traduciendo...' : 'Traducir con IA'}
+                                        {isTranslating ? `Traduciendo a ${LANGUAGES.find(l=>l.code===targetLang)?.name}...` : 'Traducir con IA'}
                                     </button>
                                     {translation && (
                                         <button onClick={downloadZip} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 animate-bounce">
@@ -301,41 +327,19 @@
                                     <textarea readOnly value={fileContent} className="flex-1 bg-transparent p-4 text-slate-300 resize-none outline-none code-view" placeholder="// Contenido original..."></textarea>
                                 </div>
                                 <div className={`glass rounded-xl flex flex-col overflow-hidden relative ${errorMsg ? 'border-red-500/50' : 'border-indigo-500/30'}`}>
-                                    <div className={`px-4 py-2 text-xs font-bold border-b ${errorMsg ? 'bg-red-900/20 text-red-400 border-red-500/30' : 'bg-indigo-900/20 text-indigo-400 border-indigo-500/30'}`}>TRADUCCIÓN {selectedModel ? `(${selectedModel})` : ''}</div>
+                                    <div className={`px-4 py-2 text-xs font-bold border-b ${errorMsg ? 'bg-red-900/20 text-red-400 border-red-500/30' : 'bg-indigo-900/20 text-indigo-400 border-indigo-500/30'}`}>TRADUCCIÓN ({targetLang.toUpperCase()}) {selectedModel ? `(${selectedModel})` : ''}</div>
                                     <textarea readOnly value={translation} className={`flex-1 bg-transparent p-4 resize-none outline-none code-view ${errorMsg ? 'text-red-300' : 'text-emerald-300'}`} placeholder="// Resultado de la IA..."></textarea>
                                     {isTranslating && (
                                         <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-[2px] flex items-center justify-center flex-col gap-2">
                                             <Icon name="cpu" className="text-indigo-400 w-10 h-10 anim-spin"/>
-                                            <span className="text-indigo-200 text-xs">Procesando archivo grande...</span>
+                                            <span className="text-indigo-200 text-xs">Procesando archivo...</span>
                                         </div>
                                     )}
                                 </div>
                             </div>
 
                             <div className="h-24 glass rounded-xl bg-black/40 p-2 overflow-y-auto font-mono text-[10px] flex flex-col-reverse">
-                                {logs.map((l, i) => <div key={i} className={l.type === 'error' ? 'text-red-400' : l.type === 'warning' ? 'text-amber-400' : l.type === 'success' ? 'text-emerald-400' : 'text-slate-500'}>[{l.time}] {l.msg}</div>)}
-                                <div ref={logEndRef} />
-                            </div>
-                        </div>
-                    </main>
-
-                    {/* BOTE DE PROPINAS */}
-                    <div className="fixed bottom-6 right-6 z-50">
-                        <a href="[https://ko-fi.com/foboz](https://ko-fi.com/foboz)" target="_blank" className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white px-5 py-3 rounded-full font-bold shadow-lg transition-all hover:scale-105 hover:shadow-rose-500/25 text-sm group">
-                            <Icon name="coffee" className="text-white group-hover:animate-bounce" size={20}/>
-                            Invítame un café
-                        </a>
-                    </div>
-                </div>
-            );
-        };
-
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
-
+                                {logs.map((l, i) => <div key={i} className={l.type === 'error' ? 'text-red-400' : l.type === 'warning' ? 'text-amber-400' :
 
 
 
