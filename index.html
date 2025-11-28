@@ -146,7 +146,7 @@
                 log(`Iniciando traducción a ${langName} con ${selectedModel}...`, 'info');
 
                 try {
-                    // Prompt actualizado con el idioma seleccionado
+                   
                     const prompt = `
                         TASK: Translate the values of this JSON to target language code: "${targetLang}".
                         CRITICAL RULES: 
@@ -250,7 +250,7 @@
             return (
                 <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto space-y-6 relative">
                     
-                    {/* ENCABEZADO AHORA CON v0.10 */}
+                    {/* ENCABEZADO */}
                     <header className="glass p-6 rounded-2xl border-l-4 border-indigo-500 flex flex-col md:flex-row gap-6 justify-between items-start">
                         <div>
                             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
@@ -345,7 +345,7 @@
                         </div>
                     </main>
 
-                    {/* BOTE DE PROPINAS */}
+                    {/* PROPINAS */}
                     <div className="fixed bottom-6 right-6 z-50">
                         <a href="https://ko-fi.com/foboz" target="_blank" className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white px-5 py-3 rounded-full font-bold shadow-lg transition-all hover:scale-105 hover:shadow-rose-500/25 text-sm group">
                             <Icon name="coffee" className="text-white group-hover:animate-bounce" size={20}/>
@@ -361,6 +361,7 @@
     </script>
 </body>
 </html>
+
 
 
 
