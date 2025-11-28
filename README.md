@@ -32,7 +32,7 @@ It uses advanced AI models (Google Gemini) to translate language files (`.json`)
 
 We are actively working on improving JarLoc based on community feedback.
 
--  **v0.11: Auto-Chunking support! Automatically splits massive language files into smaller parts to prevent AI timeouts..
+- v0.11: Auto-Chunking support! Automatically splits massive language files into smaller parts to prevent AI timeouts..
 -  **Upcoming Feature:** "Pack Merger" mode to combine multiple translated ZIPs into a single Resource Pack.
 - **Future Goal (Community Request):** Support for **Local LLMs** (e.g., Ollama, LM Studio) for completely offline and private translations.
 
