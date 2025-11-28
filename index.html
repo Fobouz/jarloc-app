@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>JarLoc v0.10 - Beta</title>
-    
+
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -13,21 +14,47 @@
     <script src="https://unpkg.com/json5@2/dist/index.min.js"></script>
     <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
     <link rel="icon" type="image/png" href="https://i.imgur.com/jYBfWdX.png">
-    
+
     <style>
-        body { background-color: #020617; color: #e2e8f0; font-family: 'Segoe UI', system-ui, sans-serif; }
+        body {
+            background-color: #020617;
+            color: #e2e8f0;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+        }
+
         .glass {
             background: rgba(15, 23, 42, 0.7);
             backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.08);
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
         }
-        .code-view { font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 0.8rem; }
-        .anim-spin { animation: spin 1s linear infinite; }
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        .lucide { display: inline-block; vertical-align: middle; }
+
+        .code-view {
+            font-family: 'JetBrains Mono', 'Consolas', monospace;
+            font-size: 0.8rem;
+        }
+
+        .anim-spin {
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .lucide {
+            display: inline-block;
+            vertical-align: middle;
+        }
     </style>
 </head>
+
 <body>
     <div id="root"></div>
 
@@ -56,6 +83,37 @@
             return <span dangerouslySetInnerHTML={{ __html: svgString }} />;
         };
 
+        // --- UTILS PARA SPLIT/MERGE ---
+        const splitJson = (data, chunkSize = 25) => {
+            if (Array.isArray(data)) {
+                const chunks = [];
+                for (let i = 0; i < data.length; i += chunkSize) {
+                    chunks.push(data.slice(i, i + chunkSize));
+                }
+                return { type: 'list', chunks };
+            } else if (typeof data === 'object' && data !== null) {
+                const keys = Object.keys(data);
+                const chunks = [];
+                for (let i = 0; i < keys.length; i += chunkSize) {
+                    const chunkKeys = keys.slice(i, i + chunkSize);
+                    const chunk = {};
+                    chunkKeys.forEach(k => chunk[k] = data[k]);
+                    chunks.push(chunk);
+                }
+                return { type: 'dict', chunks };
+            }
+            return null;
+        };
+
+        const mergeJson = (parts, type) => {
+            if (type === 'list') {
+                return parts.flat();
+            } else if (type === 'dict') {
+                return Object.assign({}, ...parts);
+            }
+            return null;
+        };
+
         const App = () => {
             const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_key_v5') || '');
             const [modelsList, setModelsList] = useState([]);
@@ -76,11 +134,11 @@
 
             useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
 
-            const log = (msg, type='info') => setLogs(prev => [{time: new Date().toLocaleTimeString(), msg, type}, ...prev]);
+            const log = (msg, type = 'info') => setLogs(prev => [{ time: new Date().toLocaleTimeString(), msg, type }, ...prev]);
 
             // --- 1. DESCUBRIMIENTO DE MODELOS ---
             const discoverModels = async () => {
-                if(!apiKey) { setErrorMsg("Por favor pega tu API Key primero"); return; }
+                if (!apiKey) { setErrorMsg("Por favor pega tu API Key primero"); return; }
                 setConnectionStatus('loading'); setErrorMsg(''); setModelsList([]);
                 log("Buscando modelos disponibles...", 'info');
 
@@ -88,7 +146,7 @@
                     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
                     const data = await res.json();
                     if (data.error) throw new Error(data.error.message);
-                    
+
                     const validModels = data.models
                         .filter(m => m.supportedGenerationMethods.includes("generateContent"))
                         .map(m => m.name.replace('models/', ''))
@@ -99,7 +157,7 @@
                     setModelsList(validModels);
                     const bestModel = validModels.find(m => m.includes('pro')) || validModels.find(m => m.includes('flash')) || validModels[0];
                     setSelectedModel(bestModel);
-                    
+
                     setConnectionStatus('success');
                     localStorage.setItem('gemini_key_v5', apiKey);
                     log(`Conectado. ${validModels.length} modelos encontrados.`, 'success');
@@ -113,18 +171,18 @@
 
             // --- 2. GESTIÓN DE ARCHIVOS ---
             const handleFile = async (e) => {
-                const f = e.target.files[0]; if(!f) return;
+                const f = e.target.files[0]; if (!f) return;
                 setFile(f); setFilesInJar([]); setTranslation(''); setFileContent(''); setCurrentPath(null);
                 try {
                     const zip = new JSZip();
                     const content = await zip.loadAsync(f);
                     const list = [];
                     content.forEach((path, entry) => {
-                        if(!entry.dir && path.includes('/lang/') && path.endsWith('.json')) list.push(path);
+                        if (!entry.dir && path.includes('/lang/') && path.endsWith('.json')) list.push(path);
                     });
                     setFilesInJar(list);
                     log(`Archivo cargado. ${list.length} traducciones encontradas.`, 'info');
-                } catch(e) { log("Error: El archivo no es un JAR/ZIP válido.", 'error'); }
+                } catch (e) { log("Error: El archivo no es un JAR/ZIP válido.", 'error'); }
             };
 
             const loadInternalFile = async (path) => {
@@ -134,93 +192,124 @@
                     const z = await zip.loadAsync(file);
                     const text = await z.file(path).async('string');
                     setFileContent(text);
-                } catch(e) { log("Error leyendo archivo interno.", 'error'); }
+                } catch (e) { log("Error leyendo archivo interno.", 'error'); }
             };
 
             // --- 3. TRADUCCIÓN INTELIGENTE ---
             const translate = async () => {
-                if(!selectedModel || !fileContent) return;
+                if (!selectedModel || !fileContent) return;
                 setIsTranslating(true); setErrorMsg('');
-                // Obtenemos el nombre legible del idioma para el log
                 const langName = LANGUAGES.find(l => l.code === targetLang)?.name || targetLang;
-                log(`Iniciando traducción a ${langName} con ${selectedModel}...`, 'info');
 
                 try {
-                   
-                    const prompt = `
-                        TASK: Translate the values of this JSON to target language code: "${targetLang}".
-                        CRITICAL RULES: 
-                        1. Output MUST be valid, parseable JSON. No markdown formatting.
-                        2. DO NOT translate keys.
-                        3. Preserve all formatting codes (§, %, <br>).
-                        
-                        INPUT JSON:
-                        ${fileContent}
-                    `;
+                    // 1. Detectar si es un archivo grande
+                    let isLargeFile = fileContent.length > 15000; // Umbral de caracteres
+                    let chunks = [];
+                    let splitType = null;
 
-                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ 
-                            contents: [{ parts: [{ text: prompt }] }],
-                            generationConfig: {
-                                temperature: 0.1,
-                                maxOutputTokens: 8192,
-                            }
-                        })
-                    });
-                    
-                    const data = await res.json();
-                    if(data.error) throw new Error(data.error.message);
-                    if(!data.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("La IA no generó respuesta (posible bloqueo de seguridad).");
-
-                    let txt = data.candidates[0].content.parts[0].text;
-                    txt = txt.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/```$/, '').trim();
-                    
-                    let finalJson;
-                    try {
-                        finalJson = JSON.parse(txt);
-                    } catch (parseError) {
-                        log(`JSON roto: ${parseError.message}. Intentando reparación inteligente...`, 'warning');
+                    if (isLargeFile) {
                         try {
-                            finalJson = JSON5.parse(txt);
-                            log("¡Reparación exitosa con JSON5!", 'success');
-                        } catch (json5Error) {
-                            log("JSON5 falló. Intentando parcheado quirúrgico...", 'warning');
-                            let patchedTxt = txt;
-                            if (!patchedTxt.endsWith('}')) {
-                                if (!patchedTxt.trim().endsWith('"')) patchedTxt += '"';
-                                patchedTxt += "\n}";
+                            const json = JSON.parse(fileContent);
+                            const splitResult = splitJson(json, 25); // 25 items por chunk
+                            if (splitResult) {
+                                chunks = splitResult.chunks;
+                                splitType = splitResult.type;
+                                log(`Archivo grande detectado. Dividido en ${chunks.length} partes.`, 'info');
+                            } else {
+                                isLargeFile = false; // No se pudo dividir (no es lista ni dict plano)
                             }
-                            try {
-                                finalJson = JSON5.parse(patchedTxt);
-                                log("¡Reparación exitosa mediante parcheado!", 'success');
-                            } catch (patchError) {
-                                throw new Error("La IA cortó la respuesta y no se pudo reparar. El archivo es demasiado grande para este modelo.");
-                            }
+                        } catch (e) {
+                            isLargeFile = false; // Error parseando, tratar como texto normal
                         }
                     }
 
-                    setTranslation(JSON.stringify(finalJson, null, 2));
-                    log("Traducción completada correctamente.", 'success');
-
-                } catch(err) {
-                    console.error(err);
-                    log(`Fallo crítico: La IA entregó un formato inválido.`, 'error');
-                    
-                    if (err.message.includes("JSON") && fileContent.length > 10000 && selectedModel.includes('flash')) {
-                         setErrorMsg("Error: El archivo es muy grande y el modelo 'Flash' falló al generar el JSON. Por favor, selecciona un modelo 'Pro' en la lista.");
-                    } else {
-                         setErrorMsg(`Error: ${err.message}. Intenta de nuevo o cambia de modelo.`);
+                    if (!isLargeFile) {
+                        // MODO NORMAL (Sin split)
+                        chunks = [fileContent]; // Tratamos el contenido entero como un solo chunk
                     }
 
+                    const translatedParts = [];
+
+                    for (let i = 0; i < chunks.length; i++) {
+                        const chunkContent = isLargeFile ? JSON.stringify(chunks[i], null, 2) : chunks[i];
+
+                        if (isLargeFile) {
+                            log(`Traduciendo parte ${i + 1}/${chunks.length}...`, 'info');
+                        } else {
+                            log(`Iniciando traducción a ${langName} con ${selectedModel}...`, 'info');
+                        }
+
+                        const prompt = `
+                            TASK: Translate the values of this JSON to target language code: "${targetLang}".
+                            CRITICAL RULES: 
+                            1. Output MUST be valid, parseable JSON. No markdown formatting.
+                            2. DO NOT translate keys.
+                            3. Preserve all formatting codes (§, %, <br>).
+                            
+                            INPUT JSON:
+                            ${chunkContent}
+                        `;
+
+                        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                contents: [{ parts: [{ text: prompt }] }],
+                                generationConfig: {
+                                    temperature: 0.1,
+                                    maxOutputTokens: 8192,
+                                }
+                            })
+                        });
+
+                        const data = await res.json();
+                        if (data.error) throw new Error(data.error.message);
+                        if (!data.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("La IA no generó respuesta.");
+
+                        let txt = data.candidates[0].content.parts[0].text;
+                        txt = txt.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/```$/, '').trim();
+
+                        let partJson;
+                        try {
+                            partJson = JSON.parse(txt);
+                        } catch (parseError) {
+                            // Intento de reparación (simplificado para el loop)
+                            try {
+                                partJson = JSON5.parse(txt);
+                            } catch (e) {
+                                // Último intento: parcheado simple
+                                let patched = txt;
+                                if (!patched.trim().endsWith('}')) patched += '}';
+                                partJson = JSON5.parse(patched);
+                            }
+                        }
+
+                        translatedParts.push(partJson);
+                    }
+
+                    // MERGE
+                    let finalJson;
+                    if (isLargeFile) {
+                        finalJson = mergeJson(translatedParts, splitType);
+                        log(`¡Todas las partes (${chunks.length}) traducidas y unidas!`, 'success');
+                    } else {
+                        finalJson = translatedParts[0];
+                        log("Traducción completada correctamente.", 'success');
+                    }
+
+                    setTranslation(JSON.stringify(finalJson, null, 2));
+
+                } catch (err) {
+                    console.error(err);
+                    log(`Error: ${err.message}`, 'error');
+                    setErrorMsg(`Error: ${err.message}`);
                 } finally {
                     setIsTranslating(false);
                 }
             };
 
             const downloadZip = async () => {
-                if(!translation) return;
+                if (!translation) return;
                 try {
                     const zip = new JSZip();
                     const pathParts = currentPath.split('/');
@@ -236,37 +325,37 @@
                     }
 
                     zip.file(newPath, translation);
-                    zip.file("pack.mcmeta", JSON.stringify({pack:{pack_format:15, description:`Traducción IA (${targetLang}) por JarLoc: ${file.name}`}}, null, 2));
-                    
-                    const b = await zip.generateAsync({type:"blob"});
+                    zip.file("pack.mcmeta", JSON.stringify({ pack: { pack_format: 15, description: `Traducción IA (${targetLang}) por JarLoc: ${file.name}` } }, null, 2));
+
+                    const b = await zip.generateAsync({ type: "blob" });
                     const a = document.createElement('a');
                     a.href = URL.createObjectURL(b);
-                    a.download = `JarLoc_${file.name.replace('.jar','')}_${targetLang.toUpperCase()}.zip`;
+                    a.download = `JarLoc_${file.name.replace('.jar', '')}_${targetLang.toUpperCase()}.zip`;
                     a.click();
                     log("Resource Pack descargado.", 'success');
-                } catch(e) { log("Error creando ZIP.", 'error'); }
+                } catch (e) { log("Error creando ZIP.", 'error'); }
             };
 
             return (
                 <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto space-y-6 relative">
-                    
+
                     {/* ENCABEZADO */}
                     <header className="glass p-6 rounded-2xl border-l-4 border-indigo-500 flex flex-col md:flex-row gap-6 justify-between items-start">
                         <div>
                             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-                                <Icon name="satellite" className="text-indigo-400"/> JarLoc <span className="text-xs bg-indigo-600 px-2 py-1 rounded">v0.10 Beta</span>
+                                <Icon name="satellite" className="text-indigo-400" /> JarLoc <span className="text-xs bg-indigo-600 px-2 py-1 rounded">v0.10 Beta</span>
                             </h1>
                             <p className="text-slate-400 text-sm mt-1">Traductor Inteligente Multi-Idioma</p>
                         </div>
 
                         <div className="w-full md:w-auto flex flex-col gap-3">
                             <div className="flex gap-2">
-                                <input type="password" value={apiKey} onChange={(e) => {setApiKey(e.target.value); setConnectionStatus('idle');}} placeholder="Pega tu Google API Key aquí" className="bg-slate-900 border border-slate-700 text-white text-sm rounded-lg px-4 py-2 w-full md:w-64 focus:outline-none focus:border-indigo-500"/>
+                                <input type="password" value={apiKey} onChange={(e) => { setApiKey(e.target.value); setConnectionStatus('idle'); }} placeholder="Pega tu Google API Key aquí" className="bg-slate-900 border border-slate-700 text-white text-sm rounded-lg px-4 py-2 w-full md:w-64 focus:outline-none focus:border-indigo-500" />
                                 <button onClick={discoverModels} disabled={connectionStatus === 'loading'} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap disabled:opacity-50">
-                                    {connectionStatus === 'loading' ? <Icon name="loader-2" className="anim-spin"/> : 'Conectar'}
+                                    {connectionStatus === 'loading' ? <Icon name="loader-2" className="anim-spin" /> : 'Conectar'}
                                 </button>
                             </div>
-                            
+
                             {/* NUEVO: SELECTOR DE IDIOMA */}
                             <div className="flex gap-2">
                                 {connectionStatus === 'success' && (
@@ -288,9 +377,9 @@
                         {/* Panel Izquierdo: Archivos */}
                         <div className="lg:col-span-3 glass rounded-xl flex flex-col overflow-hidden">
                             <div className="p-4 border-b border-white/5 bg-slate-800/50 relative">
-                                <input type="file" onChange={handleFile} accept=".jar,.zip" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"/>
+                                <input type="file" onChange={handleFile} accept=".jar,.zip" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
                                 <div className="flex flex-col items-center justify-center h-24 border-2 border-dashed border-slate-600 rounded-lg text-slate-500">
-                                    <Icon name="folder-up" className="mb-2"/>
+                                    <Icon name="folder-up" className="mb-2" />
                                     <span className="text-xs">Subir .JAR / .ZIP</span>
                                 </div>
                             </div>
@@ -310,12 +399,12 @@
                                 <div className="text-xs text-slate-400 truncate max-w-[50%]">{currentPath || 'Selecciona un archivo'}</div>
                                 <div className="flex gap-3">
                                     <button onClick={() => translate()} disabled={!fileContent || isTranslating || !selectedModel} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-bold text-white transition-all ${!selectedModel || !fileContent ? 'bg-slate-700 opacity-50 cursor-not-allowed' : isTranslating ? 'bg-amber-600 cursor-wait' : 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:shadow-lg'}`}>
-                                        {isTranslating ? <Icon name="loader-2" className="anim-spin"/> : <Icon name="sparkles"/>}
-                                        {isTranslating ? `Traduciendo a ${LANGUAGES.find(l=>l.code===targetLang)?.name}...` : 'Traducir con IA'}
+                                        {isTranslating ? <Icon name="loader-2" className="anim-spin" /> : <Icon name="sparkles" />}
+                                        {isTranslating ? `Traduciendo a ${LANGUAGES.find(l => l.code === targetLang)?.name}...` : 'Traducir con IA'}
                                     </button>
                                     {translation && (
                                         <button onClick={downloadZip} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 animate-bounce">
-                                            <Icon name="download"/> Descargar ZIP
+                                            <Icon name="download" /> Descargar ZIP
                                         </button>
                                     )}
                                 </div>
@@ -331,7 +420,7 @@
                                     <textarea readOnly value={translation} className={`flex-1 bg-transparent p-4 resize-none outline-none code-view ${errorMsg ? 'text-red-300' : 'text-emerald-300'}`} placeholder="// Resultado de la IA..."></textarea>
                                     {isTranslating && (
                                         <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-[2px] flex items-center justify-center flex-col gap-2">
-                                            <Icon name="cpu" className="text-indigo-400 w-10 h-10 anim-spin"/>
+                                            <Icon name="cpu" className="text-indigo-400 w-10 h-10 anim-spin" />
                                             <span className="text-indigo-200 text-xs">Procesando archivo...</span>
                                         </div>
                                     )}
@@ -348,7 +437,7 @@
                     {/* PROPINAS */}
                     <div className="fixed bottom-6 right-6 z-50">
                         <a href="https://ko-fi.com/foboz" target="_blank" className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white px-5 py-3 rounded-full font-bold shadow-lg transition-all hover:scale-105 hover:shadow-rose-500/25 text-sm group">
-                            <Icon name="coffee" className="text-white group-hover:animate-bounce" size={20}/>
+                            <Icon name="coffee" className="text-white group-hover:animate-bounce" size={20} />
                             Invítame un café
                         </a>
                     </div>
@@ -360,6 +449,7 @@
         root.render(<App />);
     </script>
 </body>
+
 </html>
 
 
