@@ -34,7 +34,7 @@ We are actively working on improving JarLoc based on community feedback.
 
 -  **v0.10 (Current):** Multi-language selection support.
 -  **Upcoming Feature:** "Pack Merger" mode to combine multiple translated ZIPs into a single Resource Pack.
-- 🔮 **Future Goal (Community Request):** Support for **Local LLMs** (e.g., Ollama, LM Studio) for completely offline and private translations.
+- **Future Goal (Community Request):** Support for **Local LLMs** (e.g., Ollama, LM Studio) for completely offline and private translations.
 
 ---
 
