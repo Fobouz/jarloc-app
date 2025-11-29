@@ -7,6 +7,7 @@ import LogConsole from './components/LogConsole';
 import { discoverGeminiModels, translateWithGemini } from './core/translators/gemini';
 import { discoverLocalModels, translateWithLocalLLM } from './core/translators/localLLM';
 import { splitJson, mergeJson } from './utils/helpers';
+import { processModpack } from './core/processors/modpackProcessor';
 import './App.css';
 
 function App() {
@@ -27,6 +28,10 @@ function App() {
   const [translation, setTranslation] = useState('');
   const [isTranslating, setIsTranslating] = useState(false);
   const [logs, setLogs] = useState([]);
+
+  // --- MODPACK STATE ---
+  const [isModpack, setIsModpack] = useState(false);
+  const [modpackOverrides, setModpackOverrides] = useState(null); // JSZip object with modified SNBTs
 
   // --- LOGGING ---
   const log = (msg, type = 'info') => {
@@ -70,25 +75,62 @@ function App() {
     setTranslation('');
     setFileContent('');
     setCurrentPath(null);
+    setIsModpack(false);
+    setModpackOverrides(null);
+
     log(`Analizando archivo: ${f.name}...`, 'info');
 
     try {
-      const zip = new JSZip();
-      const content = await zip.loadAsync(f);
-      const list = [];
-      content.forEach((path, entry) => {
-        if (!entry.dir && path.includes('/lang/') && path.endsWith('.json')) {
-          list.push(path);
+      // 1. Check if it's a Modpack (look for config/ftbquests)
+      const tempZip = new JSZip();
+      const loadedZip = await tempZip.loadAsync(f);
+      const isFTB = Object.keys(loadedZip.files).some(path => path.includes('config/ftbquests/quests/chapters/'));
+
+      if (isFTB) {
+        log("Modpack detectado (FTB Quests). Iniciando extracción de textos...", 'info');
+        setIsModpack(true);
+
+        const result = await processModpack(f);
+
+        if (result.count === 0) {
+          log("No se encontraron misiones (quests) para traducir.", 'warning');
+          return;
         }
-      });
-      setFilesInJar(list);
-      log(`Archivo cargado. ${list.length} traducciones encontradas.`, 'success');
+
+        setModpackOverrides(result.overridesZip);
+
+        // Prepare the extracted keys as a "virtual file" content
+        const jsonContent = JSON.stringify(result.langJson, null, 2);
+        setFileContent(jsonContent);
+
+        // Add a virtual path to the list so it can be selected (though it's auto-selected)
+        const virtualPath = "ftbquests/lang/en_us.json";
+        setFilesInJar([virtualPath]);
+        setCurrentPath(virtualPath);
+
+        log(`Extracción completada. ${result.count} archivos procesados. ${Object.keys(result.langJson).length} textos extraídos.`, 'success');
+
+      } else {
+        // 2. Standard Mod Logic
+        const list = [];
+        loadedZip.forEach((path, entry) => {
+          if (!entry.dir && path.includes('/lang/') && path.endsWith('.json')) {
+            list.push(path);
+          }
+        });
+        setFilesInJar(list);
+        log(`Archivo cargado. ${list.length} traducciones encontradas.`, 'success');
+      }
+
     } catch (e) {
+      console.error(e);
       log("Error: El archivo no es un JAR/ZIP válido.", 'error');
     }
   };
 
   const handleSelectFile = async (path) => {
+    if (isModpack) return; // In modpack mode, we only have one virtual file already loaded
+
     setCurrentPath(path);
     setTranslation('');
     try {
@@ -178,39 +220,71 @@ function App() {
     if (!translation) return;
     try {
       const zip = new JSZip();
-      // Usamos el código del idioma seleccionado para el nombre del archivo (ej: fr_fr.json)
-      // Nota: En una app real, deberíamos mapear 'fr' a 'fr_fr', 'es' a 'es_es', etc.
-      // Por simplicidad usaremos el código tal cual o duplicado si es corto.
-      const langCode = targetLang.length === 2 ? `${targetLang}_${targetLang}` : targetLang;
-      const langFileName = `${langCode}.json`;
 
-      let newPath = `assets/translated_mod/lang/${langFileName}`;
-
-      // Intentar mantener la estructura original si es posible
-      if (currentPath) {
-        const pathParts = currentPath.split('/');
-        if (pathParts.length >= 3 && pathParts.includes('lang')) {
-          // Reemplazar el nombre del archivo final
-          pathParts[pathParts.length - 1] = langFileName;
-          newPath = pathParts.join('/');
+      if (isModpack) {
+        // --- MODPACK EXPORT ---
+        // 1. Add modified SNBTs (from overridesZip)
+        // We need to copy files from modpackOverrides (JSZip) to the new zip
+        // Since JSZip doesn't have a direct "merge", we iterate
+        const overridesFiles = Object.keys(modpackOverrides.files);
+        for (const path of overridesFiles) {
+          if (!modpackOverrides.files[path].dir) {
+            const content = await modpackOverrides.file(path).async('string');
+            zip.file(path, content);
+          }
         }
+
+        // 2. Add the translated language file (KubeJS format)
+        // assets/kubejs/lang/xx_xx.json
+        const langCode = targetLang.length === 2 ? `${targetLang}_${targetLang}` : targetLang;
+        zip.file(`kubejs/assets/kubejs/lang/${langCode}.json`, translation);
+
+        zip.file("pack.mcmeta", JSON.stringify({
+          pack: {
+            pack_format: 15,
+            description: `Traducción Modpack (${targetLang}) por JarLoc`
+          }
+        }, null, 2));
+
+        const b = await zip.generateAsync({ type: "blob" });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(b);
+        a.download = `JarLoc_Modpack_${targetLang.toUpperCase()}.zip`;
+        a.click();
+        log("Modpack traducido descargado. Descomprime en la carpeta del modpack.", 'success');
+
+      } else {
+        // --- STANDARD MOD EXPORT ---
+        const langCode = targetLang.length === 2 ? `${targetLang}_${targetLang}` : targetLang;
+        const langFileName = `${langCode}.json`;
+
+        let newPath = `assets/translated_mod/lang/${langFileName}`;
+
+        if (currentPath) {
+          const pathParts = currentPath.split('/');
+          if (pathParts.length >= 3 && pathParts.includes('lang')) {
+            pathParts[pathParts.length - 1] = langFileName;
+            newPath = pathParts.join('/');
+          }
+        }
+
+        zip.file(newPath, translation);
+        zip.file("pack.mcmeta", JSON.stringify({
+          pack: {
+            pack_format: 15,
+            description: `Traducción IA (${targetLang}) por JarLoc: ${file.name}`
+          }
+        }, null, 2));
+
+        const b = await zip.generateAsync({ type: "blob" });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(b);
+        a.download = `JarLoc_${file.name.replace('.jar', '').replace('.zip', '')}_${targetLang.toUpperCase()}.zip`;
+        a.click();
+        log("Resource Pack descargado.", 'success');
       }
-
-      zip.file(newPath, translation);
-      zip.file("pack.mcmeta", JSON.stringify({
-        pack: {
-          pack_format: 15,
-          description: `Traducción IA (${targetLang}) por JarLoc: ${file.name}`
-        }
-      }, null, 2));
-
-      const b = await zip.generateAsync({ type: "blob" });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(b);
-      a.download = `JarLoc_${file.name.replace('.jar', '').replace('.zip', '')}_${targetLang.toUpperCase()}.zip`;
-      a.click();
-      log("Archivo descargado.", 'success');
     } catch (e) {
+      console.error(e);
       log("Error al generar el ZIP.", 'error');
     }
   };
