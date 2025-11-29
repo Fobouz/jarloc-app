@@ -55,7 +55,27 @@ Upon launching the application, configure your AI provider in the header section
 
 ### 4. Export
 
-Once the translation is complete, click the **Download** button to generate a `.zip` file containing the translated resources. This file can be placed directly into the Minecraft `resourcepacks` folder.
+Once the translation is complete, click the **Download** button.
+
+## How to Install Translations
+
+### Standard Mods (Resource Pack)
+If you translated a single `.jar` file, the output is a **Resource Pack**.
+1.  Copy the downloaded `.zip` file to your `resourcepacks` folder.
+2.  Launch Minecraft, go to **Options > Resource Packs**, and move the pack to the right side.
+
+### Modpacks (FTB Quests)
+If you translated a Modpack (detected via `config/ftbquests`), the output is a **Patch** containing `kubejs` and `overrides` folders.
+
+#### Option A: Modpack already installed
+1.  Open your Minecraft instance folder (where you see folders like `mods`, `config`, `saves`).
+2.  **Extract** the downloaded ZIP directly into this folder.
+3.  **Merge/Overwrite** files when prompted. This will update the quest definitions (`.snbt`) and add the language files (`kubejs/assets...`).
+4.  Restart the game or run `/kubejs reload lang` and `/ftbquests reload`.
+
+#### Option B: Before installing (Modpack Creation)
+1.  If you are building a modpack, extract the contents of the ZIP into your project's root directory (or merge with your existing `overrides` folder).
+2.  Ensure the `kubejs` folder is at the root level alongside `mods` and `config`.
 
 ## Architecture
 
