@@ -46,7 +46,7 @@ export const translateWithGemini = async (apiKey, model, text, targetLang) => {
     if (!data.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("La IA no generó respuesta.");
 
     let txt = data.candidates[0].content.parts[0].text;
-    txt = txt.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/```$/, '').trim();
+    txt = txt.trim().replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/```$/, '').trim();
 
     try {
         return JSON.parse(txt);

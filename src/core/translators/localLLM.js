@@ -47,7 +47,7 @@ export const translateWithLocalLLM = async (url, model, text, targetLang) => {
     if (!data.choices?.[0]?.message?.content) throw new Error("La IA local no generó respuesta.");
 
     let txt = data.choices[0].message.content;
-    txt = txt.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/```$/, '').trim();
+    txt = txt.trim().replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/```$/, '').trim();
 
     try {
         return JSON.parse(txt);
