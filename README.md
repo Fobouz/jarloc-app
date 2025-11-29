@@ -69,3 +69,9 @@ This project is built using a modern web development stack:
 ## License
 
 This project is open source.
+
+## Support
+
+If you find this tool useful, consider supporting the development:
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/foboz)

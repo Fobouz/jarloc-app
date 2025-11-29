@@ -77,8 +77,8 @@ const Header = ({
                     onClick={onConnect}
                     disabled={connectionStatus === 'loading'}
                     className={`p-2 rounded-lg border transition-all ${connectionStatus === 'success' ? 'bg-green-500/10 border-green-500/50 text-green-400' :
-                            connectionStatus === 'error' ? 'bg-red-500/10 border-red-500/50 text-red-400' :
-                                'bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300'
+                        connectionStatus === 'error' ? 'bg-red-500/10 border-red-500/50 text-red-400' :
+                            'bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300'
                         }`}
                 >
                     {connectionStatus === 'loading' ? <Cpu className="anim-spin" size={18} /> : <Link size={18} />}
@@ -94,6 +94,17 @@ const Header = ({
                         {modelsList.map(m => <option key={m} value={m}>{m}</option>)}
                     </select>
                 )}
+
+                {/* Ko-fi Button */}
+                <a
+                    href="https://ko-fi.com/foboz"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-2 rounded-lg bg-[#FF5E5B]/10 border border-[#FF5E5B]/50 text-[#FF5E5B] hover:bg-[#FF5E5B]/20 transition-all flex items-center justify-center"
+                    title="Support on Ko-fi"
+                >
+                    <span className="font-bold text-xs mr-1">♥</span>
+                </a>
 
                 {/* Language Selector */}
                 <select
