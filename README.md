@@ -1,5 +1,7 @@
 # JarLoc - AI Mod Translator
 
+**Web App:** [https://jarloc-app.vercel.app/](https://jarloc-app.vercel.app/)
+
 JarLoc is a specialized tool designed to automate the localization process of Minecraft mods. By leveraging the power of Artificial Intelligence (Google Gemini and Local LLMs), it allows users to translate language files contained within `.jar` or `.zip` archives efficiently and accurately.
 
 ## Key Features
