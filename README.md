@@ -1,10 +1,12 @@
-# JarLoc Core v1.0 🌍
+# JarLoc Core v1.0
+
+Prueba la aplicación aquí: [https://jarloc-app.vercel.app/](https://jarloc-app.vercel.app/)
 
 **JarLoc Core** es una herramienta web moderna y potente diseñada para traducir mods y modpacks de Minecraft de forma automática utilizando Inteligencia Artificial. Soporta tanto **Google Gemini** como **LLMs Locales** (vía Ollama), ofreciendo flexibilidad y privacidad.
 
 ![JarLoc Logo](public/logo.png)
 
-## 🚀 Características Principales
+## Características Principales
 
 *   **Traducción de Mods (.jar)**: Sube tus archivos `.jar` y traduce sus archivos de idioma (`en_us.json`, etc.) automáticamente.
 *   **Soporte para Modpacks**: Detecta y traduce misiones de **FTB Quests** y otros archivos de configuración.
@@ -18,7 +20,7 @@
 *   **Interfaz Moderna**: Diseño intuitivo con Drag & Drop, modo oscuro y seguimiento de progreso en tiempo real.
 *   **Manejo de Errores**: Reintentos automáticos si la API está saturada y alertas visuales.
 
-## 🛠️ Cómo Usar
+## Cómo Usar
 
 ### 1. Configuración de la IA
 *   **Google Gemini**: Selecciona "Gemini" en la barra superior y pega tu API Key.
@@ -27,7 +29,7 @@
 ### 2. Traducir un Solo Mod
 1.  Arrastra tu archivo `.jar` al área de carga "1. Sube tus Mods".
 2.  Selecciona el archivo de idioma que quieres traducir de la lista lateral.
-3.  Haz clic en el botón de la flecha (➡️) para traducir.
+3.  Haz clic en el botón de la flecha (->) para traducir.
 4.  Revisa la traducción y haz clic en "Descargar" para obtener el Resource Pack.
 
 ### 3. Traducción por Lotes (Batch)
@@ -40,7 +42,7 @@
 1.  Arrastra tus resource packs existentes al área "2. Packs Base".
 2.  Haz clic en el botón "Fusionar y Descargar" que aparecerá automáticamente.
 
-## 📦 Instalación (Desarrollo)
+## Instalación (Desarrollo)
 
 Si quieres ejecutar este proyecto localmente:
 
@@ -56,9 +58,9 @@ npm install
 npm run dev
 ```
 
-## 🔗 Enlaces
+## Enlaces
 
-*   **Web Oficial**: [Enlace a tu página web si tienes]
+*   **Web Oficial**: [https://jarloc-app.vercel.app/](https://jarloc-app.vercel.app/)
 *   **Reportar Bugs**: Por favor usa la sección de Issues en GitHub.
 
 ---
