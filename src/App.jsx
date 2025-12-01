@@ -8,15 +8,23 @@ import LogConsole from './components/LogConsole';
 import BatchProgress from './components/BatchProgress';
 import { discoverGeminiModels, translateWithGemini } from './core/translators/gemini';
 import { discoverLocalModels, translateWithLocalLLM } from './core/translators/localLLM';
+import { discoverOpenAIModels, translateWithOpenAICompatible, PROVIDERS_CONFIG } from './core/translators/openaiCompatible';
 import { splitJson, mergeJson } from './utils/helpers';
 import { processModpack } from './core/processors/modpackProcessor';
 import './App.css';
 
 function App() {
   // --- STATE ---
-  const [provider, setProvider] = useState('gemini'); // 'gemini' | 'local'
+  const [provider, setProvider] = useState('gemini'); // 'gemini' | 'local' | 'groq' | 'deepseek' | 'openrouter'
   const [localUrl, setLocalUrl] = useState('http://localhost:11434/v1');
-  const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_key_v5') || '');
+
+  // API Keys State
+  const [apiKeys, setApiKeys] = useState({
+    gemini: localStorage.getItem('gemini_key_v5') || '',
+    groq: localStorage.getItem('groq_key') || '',
+    deepseek: localStorage.getItem('deepseek_key') || '',
+    openrouter: localStorage.getItem('openrouter_key') || ''
+  });
 
   const [modelsList, setModelsList] = useState([]);
   const [selectedModel, setSelectedModel] = useState('');
@@ -47,18 +55,29 @@ function App() {
 
   // --- HANDLERS ---
 
+  const handleApiKeyChange = (value) => {
+    setApiKeys(prev => ({ ...prev, [provider]: value }));
+  };
+
   const handleConnect = async () => {
     setConnectionStatus('loading');
     setModelsList([]);
-    log(`Conectando a ${provider === 'gemini' ? 'Google Gemini' : 'Local LLM'}...`, 'info');
+    const providerName = provider === 'local' ? 'Local LLM' :
+      provider === 'gemini' ? 'Google Gemini' :
+        PROVIDERS_CONFIG[provider]?.name || provider;
+
+    log(`Conectando a ${providerName}...`, 'info');
 
     try {
       let validModels = [];
       if (provider === 'gemini') {
-        validModels = await discoverGeminiModels(apiKey);
-        localStorage.setItem('gemini_key_v5', apiKey);
-      } else {
+        validModels = await discoverGeminiModels(apiKeys.gemini);
+        localStorage.setItem('gemini_key_v5', apiKeys.gemini);
+      } else if (provider === 'local') {
         validModels = await discoverLocalModels(localUrl);
+      } else if (['groq', 'deepseek', 'openrouter'].includes(provider)) {
+        validModels = await discoverOpenAIModels(provider, apiKeys[provider]);
+        localStorage.setItem(`${provider}_key`, apiKeys[provider]);
       }
 
       if (validModels.length === 0) throw new Error("No se encontraron modelos disponibles.");
@@ -179,9 +198,11 @@ function App() {
     for (let i = 0; i < retries; i++) {
       try {
         if (provider === 'gemini') {
-          return await translateWithGemini(apiKey, model, chunkContent, lang);
-        } else {
+          return await translateWithGemini(apiKeys.gemini, model, chunkContent, lang);
+        } else if (provider === 'local') {
           return await translateWithLocalLLM(localUrl, model, chunkContent, lang);
+        } else if (['groq', 'deepseek', 'openrouter'].includes(provider)) {
+          return await translateWithOpenAICompatible(provider, apiKeys[provider], model, chunkContent, lang);
         }
       } catch (err) {
         const isOverloaded = err.message.includes('overloaded') || err.message.includes('429');
@@ -261,40 +282,102 @@ function App() {
         const zip = new JSZip();
         const loadedZip = await zip.loadAsync(item.file);
 
-        // Find language file
-        let langPath = null;
+        // 1. Find Source Language File (en_us.json or any .json)
+        let sourcePath = null;
         loadedZip.forEach((path, entry) => {
           if (!entry.dir && path.includes('/lang/') && path.endsWith('en_us.json')) {
-            langPath = path;
+            sourcePath = path;
           }
         });
 
-        // Fallback to any json in lang if en_us not found
-        if (!langPath) {
+        if (!sourcePath) {
           loadedZip.forEach((path, entry) => {
             if (!entry.dir && path.includes('/lang/') && path.endsWith('.json')) {
-              langPath = path;
+              sourcePath = path;
             }
           });
         }
 
-        if (!langPath) {
-          // WARNING instead of ERROR
+        if (!sourcePath) {
           newBatchFiles[i] = { ...item, status: 'warning' };
           setBatchFiles([...newBatchFiles]);
-          log(`Advertencia en ${item.name}: No se encontró archivo de idioma. Saltando...`, 'warning');
+          log(`Advertencia en ${item.name}: No se encontró archivo de idioma base. Saltando...`, 'warning');
           continue;
         }
 
-        const content = await loadedZip.file(langPath).async('string');
-        const translatedJson = await processSingleFileTranslation(content, selectedModel, targetLang);
+        // 2. Read Source Content
+        const sourceContentStr = await loadedZip.file(sourcePath).async('string');
+        let sourceJson = {};
+        try {
+          sourceJson = JSON.parse(sourceContentStr);
+        } catch (e) {
+          // Try JSON5 or loose parsing if strictly needed, but usually standard JSON for MC
+          console.error("Error parsing source JSON", e);
+          throw new Error("El archivo de idioma base está corrupto.");
+        }
 
-        // Generate Result ZIP
-        const resultZip = new JSZip();
+        // 3. Check for Existing Target Language File (Incremental Translation)
         const langCode = targetLang.length === 2 ? `${targetLang}_${targetLang}` : targetLang;
-        const newPath = `assets/translated_mod/lang/${langCode}.json`;
+        const targetFileName = `${langCode}.json`;
+        let existingTargetPath = null;
 
-        resultZip.file(newPath, JSON.stringify(translatedJson, null, 2));
+        // Try to find the target file in the same folder structure as source
+        const sourceDir = sourcePath.substring(0, sourcePath.lastIndexOf('/') + 1);
+        const potentialPath = sourceDir + targetFileName;
+
+        if (loadedZip.file(potentialPath)) {
+          existingTargetPath = potentialPath;
+        }
+
+        let existingTargetJson = {};
+        let keysToTranslate = {};
+        let reusedCount = 0;
+
+        if (existingTargetPath) {
+          log(`  -> Archivo de idioma existente detectado (${targetFileName}). Analizando faltantes...`, 'info');
+          try {
+            const existingContentStr = await loadedZip.file(existingTargetPath).async('string');
+            existingTargetJson = JSON.parse(existingContentStr);
+
+            // Compare keys
+            Object.keys(sourceJson).forEach(key => {
+              if (!existingTargetJson[key]) {
+                keysToTranslate[key] = sourceJson[key];
+              } else {
+                reusedCount++;
+              }
+            });
+
+            if (Object.keys(keysToTranslate).length === 0) {
+              log(`  -> ¡Traducción completa encontrada! Reusando 100% (${reusedCount} textos).`, 'success');
+            } else {
+              log(`  -> Reusando ${reusedCount} textos. Traduciendo ${Object.keys(keysToTranslate).length} nuevos...`, 'info');
+            }
+
+          } catch (e) {
+            console.warn("Error parsing existing target file, ignoring it.", e);
+            keysToTranslate = sourceJson; // Fallback to full translation
+          }
+        } else {
+          keysToTranslate = sourceJson;
+        }
+
+        // 4. Translate (if needed)
+        let finalTranslatedJson = { ...existingTargetJson };
+
+        if (Object.keys(keysToTranslate).length > 0) {
+          const contentToTranslate = JSON.stringify(keysToTranslate, null, 2);
+          const translatedPart = await processSingleFileTranslation(contentToTranslate, selectedModel, targetLang);
+
+          // Merge new translations
+          finalTranslatedJson = { ...finalTranslatedJson, ...translatedPart };
+        }
+
+        // 5. Generate Result ZIP
+        const resultZip = new JSZip();
+        const newPath = `assets/translated_mod/lang/${targetFileName}`;
+
+        resultZip.file(newPath, JSON.stringify(finalTranslatedJson, null, 2));
         resultZip.file("pack.mcmeta", JSON.stringify({
           pack: {
             pack_format: 15,
@@ -308,8 +391,10 @@ function App() {
         setBatchFiles([...newBatchFiles]);
         log(`Archivo ${item.name} completado.`, 'success');
 
-        // Delay between files
-        await delay(1000);
+        // Delay between files only if we actually translated something
+        if (Object.keys(keysToTranslate).length > 0) {
+          await delay(1000);
+        }
 
       } catch (err) {
         console.error(err);
@@ -500,7 +585,7 @@ function App() {
     <div className="app-container min-h-screen flex flex-col text-gray-100 font-sans selection:bg-fuchsia-500/30">
       <Header
         provider={provider} setProvider={setProvider}
-        apiKey={apiKey} setApiKey={setApiKey}
+        apiKeys={apiKeys} onApiKeyChange={handleApiKeyChange}
         localUrl={localUrl} setLocalUrl={setLocalUrl}
         modelsList={modelsList} selectedModel={selectedModel} setSelectedModel={setSelectedModel}
         targetLang={targetLang} setTargetLang={setTargetLang}

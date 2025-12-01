@@ -14,7 +14,7 @@ const LANGUAGES = [
 
 const Header = ({
     provider, setProvider,
-    apiKey, setApiKey,
+    apiKeys, onApiKeyChange,
     localUrl, setLocalUrl,
     modelsList, selectedModel, setSelectedModel,
     targetLang, setTargetLang,
@@ -42,38 +42,36 @@ const Header = ({
 
             <div className="flex flex-wrap items-center gap-3 z-10">
                 {/* Provider Selector */}
-                <div className="flex items-center bg-black/40 rounded-lg p-1 border border-white/10 backdrop-blur-sm">
-                    <button
-                        onClick={() => setProvider('gemini')}
-                        className={`px-3 py-1.5 rounded-md text-sm transition-all ${provider === 'gemini' ? 'bg-fuchsia-600 text-white shadow-[0_0_10px_rgba(217,70,239,0.4)]' : 'text-gray-400 hover:text-white'}`}
-                    >
-                        Gemini
-                    </button>
-                    <button
-                        onClick={() => setProvider('local')}
-                        className={`px-3 py-1.5 rounded-md text-sm transition-all ${provider === 'local' ? 'bg-cyan-600 text-white shadow-[0_0_10px_rgba(6,182,212,0.4)]' : 'text-gray-400 hover:text-white'}`}
-                    >
-                        Local LLM
-                    </button>
+                <div className="flex items-center bg-black/40 rounded-lg p-1 border border-white/10 backdrop-blur-sm overflow-x-auto max-w-[300px] md:max-w-none custom-scrollbar">
+                    <button onClick={() => setProvider('gemini')} className={`px-3 py-1.5 rounded-md text-sm transition-all whitespace-nowrap ${provider === 'gemini' ? 'bg-fuchsia-600 text-white shadow-[0_0_10px_rgba(217,70,239,0.4)]' : 'text-gray-400 hover:text-white'}`}>Gemini</button>
+                    <button onClick={() => setProvider('groq')} className={`px-3 py-1.5 rounded-md text-sm transition-all whitespace-nowrap ${provider === 'groq' ? 'bg-orange-600 text-white shadow-[0_0_10px_rgba(249,115,22,0.4)]' : 'text-gray-400 hover:text-white'}`}>Groq</button>
+                    <button onClick={() => setProvider('deepseek')} className={`px-3 py-1.5 rounded-md text-sm transition-all whitespace-nowrap ${provider === 'deepseek' ? 'bg-blue-600 text-white shadow-[0_0_10px_rgba(37,99,235,0.4)]' : 'text-gray-400 hover:text-white'}`}>DeepSeek</button>
+                    <button onClick={() => setProvider('openrouter')} className={`px-3 py-1.5 rounded-md text-sm transition-all whitespace-nowrap ${provider === 'openrouter' ? 'bg-violet-600 text-white shadow-[0_0_10px_rgba(124,58,237,0.4)]' : 'text-gray-400 hover:text-white'}`}>OpenRouter</button>
+                    <button onClick={() => setProvider('local')} className={`px-3 py-1.5 rounded-md text-sm transition-all whitespace-nowrap ${provider === 'local' ? 'bg-cyan-600 text-white shadow-[0_0_10px_rgba(6,182,212,0.4)]' : 'text-gray-400 hover:text-white'}`}>Local</button>
                 </div>
 
                 {/* Credentials Input */}
                 <div className="relative group">
-                    {provider === 'gemini' ? (
-                        <input
-                            type="password"
-                            value={apiKey}
-                            onChange={(e) => setApiKey(e.target.value)}
-                            placeholder="Pegar Gemini API Key..."
-                            className="w-48 bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-fuchsia-500 focus:border-fuchsia-500 outline-none transition-all text-fuchsia-100 placeholder-gray-600"
-                        />
-                    ) : (
+                    {provider === 'local' ? (
                         <input
                             type="text"
                             value={localUrl}
                             onChange={(e) => setLocalUrl(e.target.value)}
                             placeholder="http://localhost:11434..."
                             className="w-48 bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-cyan-500 focus:border-cyan-500 outline-none transition-all text-cyan-100 placeholder-gray-600"
+                        />
+                    ) : (
+                        <input
+                            type="password"
+                            value={apiKeys[provider] || ''}
+                            onChange={(e) => onApiKeyChange(e.target.value)}
+                            placeholder={`API Key de ${provider.charAt(0).toUpperCase() + provider.slice(1)}...`}
+                            className={`w-48 bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm focus:ring-1 outline-none transition-all placeholder-gray-600
+                                ${provider === 'gemini' ? 'focus:ring-fuchsia-500 text-fuchsia-100' :
+                                    provider === 'groq' ? 'focus:ring-orange-500 text-orange-100' :
+                                        provider === 'deepseek' ? 'focus:ring-blue-500 text-blue-100' :
+                                            'focus:ring-violet-500 text-violet-100'
+                                }`}
                         />
                     )}
                 </div>

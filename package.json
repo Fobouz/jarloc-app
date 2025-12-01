@@ -1,7 +1,7 @@
 {
   "name": "jarloc-core",
   "private": true,
-  "version": "1.1fix",
+  "version": "1.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
