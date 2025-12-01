@@ -52,6 +52,55 @@ git clone https://github.com/tu-usuario/jarloc-core.git
 
 # Instalar dependencias
 cd jarloc-core
+npm install
+
+# Iniciar servidor de desarrollo
+npm run dev
+```
+
+## Historial de Versiones
+
+### v1.2 (Multi-Provider & Smart Batch)
+- **Nuevos Proveedores**: Soporte nativo para **Groq**, **DeepSeek** y **OpenRouter**.
+- **Traducción Incremental**: Ahora detecta si un mod ya tiene traducción parcial y solo traduce lo que falta (ahorro masivo de tokens).
+- **Descarga Parcial**: Botón de descarga disponible desde el primer archivo completado en un lote.
+- **Mejoras UI**: Nuevos selectores de proveedor y ajustes visuales.
+
+### v1.1fix (Neon Update)
+- **Nuevo Tema Visual**: Diseño "Neon-Galactic" con efectos de cristal y brillos.
+- **Mejoras en Consola**: Logs detallados para archivos grandes divididos y fix de auto-scroll.
+- **Bug Fixes**: Solucionado error de pantalla blanca por sintaxis.
+
+## 🛠️ Instalación de Traducciones (Modpacks)
+
+Una vez que hayas traducido tus mods o modpack completo, aquí te explicamos cómo instalarlos:
+
+### Opción A: Mods Sueltos (Carpeta `mods`)
+Si tradujiste archivos `.jar` individuales:
+1. Ve a tu carpeta de instalación de Minecraft (o del perfil de CurseForge/Prism).
+2. Abre la carpeta `mods`.
+3. **Reemplaza** los archivos originales con los nuevos `.jar` traducidos que descargaste de JarLoc.
+   - *Nota: JarLoc mantiene el nombre original del archivo para facilitar esto.*
+
+### Opción B: Modpack Completo (Resource Pack + Mods)
+Si usaste la función de "Fusionar Packs" o procesaste un Modpack:
+
+**1. Archivos `.jar` (Mods)**
+- Igual que la Opción A: reemplaza los `.jar` en la carpeta `mods` con los traducidos.
+
+**2. Archivos de Configuración (FTB Quests, etc.)**
+- Si el ZIP incluye carpetas como `config` o `kubejs`, arrástralas a la raíz de tu instancia de Minecraft y sobrescribe.
+
+**3. Resource Pack (Idioma)**
+- El archivo `resources.zip` (o similar) generado es un **Resource Pack**.
+- Colócalo en la carpeta `resourcepacks` de tu instancia.
+- En el juego, ve a `Opciones` -> `Paquetes de Recursos` y activa el paquete "Traducción IA por JarLoc".
+- Asegúrate de que esté **arriba** en la lista de prioridades.
+
+## Enlaces
+
+*   **Web Oficial**: [https://jarloc-app.vercel.app/](https://jarloc-app.vercel.app/)
+*   **Reportar Bugs**: Por favor usa la sección de Issues en GitHub.
 
 ---
 
