@@ -1,4 +1,4 @@
-# JarLoc Core v1.0
+# JarLoc Core v1.1
 
 Prueba la aplicación aquí: [https://jarloc-app.vercel.app/](https://jarloc-app.vercel.app/)
 
