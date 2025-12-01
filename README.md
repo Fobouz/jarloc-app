@@ -85,6 +85,9 @@ Si tradujiste archivos `.jar` individuales:
 ### Opción B: Modpack Completo (Resource Pack + Mods)
 Si usaste la función de "Fusionar Packs" o procesaste un Modpack:
 
+> [!IMPORTANT]
+> **Requisito Obligatorio**: Para que las traducciones de modpacks funcionen, el mod **KubeJS** (y sus dependencias como Rhino) debe estar instalado en tu instancia. Si el modpack no lo incluye, descárgalo e instálalo manualmente.
+
 **1. Archivos `.jar` (Mods)**
 - Igual que la Opción A: reemplaza los `.jar` en la carpeta `mods` con los traducidos.
 
