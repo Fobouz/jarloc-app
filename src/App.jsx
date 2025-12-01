@@ -220,7 +220,11 @@ function App() {
     if (!isLargeFile) chunks = [content];
 
     const translatedParts = [];
-    for (const chunk of chunks) {
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      if (chunks.length > 1) {
+        log(`Traduciendo parte ${i + 1} de ${chunks.length}...`, 'info');
+      }
       const chunkContent = isLargeFile ? JSON.stringify(chunk, null, 2) : chunk;
 
       // Use retry wrapper
@@ -493,7 +497,7 @@ function App() {
   };
 
   return (
-    <div className="app-container min-h-screen flex flex-col bg-gray-900 text-white font-sans selection:bg-blue-500/30">
+    <div className="app-container min-h-screen flex flex-col text-gray-100 font-sans selection:bg-fuchsia-500/30">
       <Header
         provider={provider} setProvider={setProvider}
         apiKey={apiKey} setApiKey={setApiKey}
@@ -524,7 +528,7 @@ function App() {
           <div className="flex justify-center">
             <button
               onClick={handleBatchDownload}
-              className="flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-xl transition-colors font-bold shadow-lg"
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-fuchsia-600 to-purple-600 hover:from-fuchsia-500 hover:to-purple-500 text-white rounded-xl transition-all font-bold shadow-[0_0_15px_rgba(217,70,239,0.3)] hover:shadow-[0_0_25px_rgba(217,70,239,0.5)] hover:scale-105"
             >
               <Download size={20} />
               Fusionar y Descargar

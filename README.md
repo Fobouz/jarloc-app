@@ -58,6 +58,15 @@ npm install
 npm run dev
 ```
 
+## Historial de Versiones
+
+### v1.1fix (Neon Update)
+*   **Nuevo Tema Visual**: Diseño "Neon-Galactic" con modo oscuro profundo y acentos brillantes.
+*   **Mejoras en Consola**:
+    *   Logs detallados al dividir archivos grandes ("Traduciendo parte X de Y...").
+    *   Fix: La consola ya no fuerza el scroll de toda la página.
+*   **Correcciones**: Solucionado error de pantalla blanca en algunos navegadores.
+
 ## Enlaces
 
 *   **Web Oficial**: [https://jarloc-app.vercel.app/](https://jarloc-app.vercel.app/)
