@@ -69,6 +69,20 @@ function App() {
     log(`Conectando a ${providerName}...`, 'info');
 
     try {
+      let validModels = [];
+      if (provider === 'gemini') {
+        validModels = await discoverGeminiModels(apiKeys.gemini);
+        localStorage.setItem('gemini_key_v5', apiKeys.gemini);
+      } else if (provider === 'local') {
+        validModels = await discoverLocalModels(localUrl);
+      } else if (['groq', 'deepseek', 'openrouter'].includes(provider)) {
+        validModels = await discoverOpenAIModels(provider, apiKeys[provider]);
+        localStorage.setItem(`${provider}_key`, apiKeys[provider]);
+      }
+
+      if (validModels.length === 0) throw new Error("No se encontraron modelos disponibles.");
+
+      setModelsList(validModels);
       setSelectedModel(validModels[0]);
       setConnectionStatus('success');
       log(`Conectado. ${validModels.length} modelos encontrados.`, 'success');
