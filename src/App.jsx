@@ -31,6 +31,17 @@ function App() {
   const [targetLang, setTargetLang] = useState('es');
   const [connectionStatus, setConnectionStatus] = useState('idle'); // 'idle' | 'loading' | 'success' | 'error'
 
+  // Refs for runtime access in async loops
+  const providerRef = React.useRef(provider);
+  const apiKeysRef = React.useRef(apiKeys);
+  const selectedModelRef = React.useRef(selectedModel);
+
+  useEffect(() => {
+    providerRef.current = provider;
+    apiKeysRef.current = apiKeys;
+    selectedModelRef.current = selectedModel;
+  }, [provider, apiKeys, selectedModel]);
+
   const [files, setFiles] = useState([]); // Array of file objects
   const [filesInJar, setFilesInJar] = useState([]);
   const [currentPath, setCurrentPath] = useState(null);
@@ -49,6 +60,14 @@ function App() {
   useEffect(() => {
     batchStatusRef.current = batchStatus;
   }, [batchStatus]);
+
+  // --- SINGLE TRANSLATION STATE ---
+  const [translationStatus, setTranslationStatus] = useState('idle'); // 'idle' | 'translating' | 'paused' | 'stopped'
+  const translationStatusRef = React.useRef(translationStatus);
+
+  useEffect(() => {
+    translationStatusRef.current = translationStatus;
+  }, [translationStatus]);
 
   // --- MODPACK STATE ---
   const [isModpack, setIsModpack] = useState(false);
@@ -200,15 +219,49 @@ function App() {
 
   const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+  const getExistingTranslation = async (zip, targetLang) => {
+    try {
+      let existingFile = null;
+      const langCode = targetLang.length === 2 ? `${targetLang}_${targetLang}` : targetLang;
+
+      // Search for exact match first (e.g., es_es.json)
+      zip.forEach((path, entry) => {
+        if (!entry.dir && path.includes('/lang/') && path.toLowerCase().endsWith(`${langCode}.json`)) {
+          existingFile = path;
+        }
+      });
+
+      // If not found, try generic (e.g., es.json) if target is 2 chars
+      if (!existingFile && targetLang.length === 2) {
+        zip.forEach((path, entry) => {
+          if (!entry.dir && path.includes('/lang/') && path.toLowerCase().endsWith(`${targetLang}.json`)) {
+            existingFile = path;
+          }
+        });
+      }
+
+      if (existingFile) {
+        const content = await zip.file(existingFile).async('string');
+        return JSON.parse(content);
+      }
+    } catch (e) {
+      console.warn("Error reading existing translation:", e);
+    }
+    return null;
+  };
+
   const translateWithRetry = async (model, chunkContent, lang, retries = 3) => {
     for (let i = 0; i < retries; i++) {
       try {
-        if (provider === 'gemini') {
-          return await translateWithGemini(apiKeys.gemini, model, chunkContent, lang);
-        } else if (provider === 'local') {
+        const currentProvider = providerRef.current;
+        const currentKeys = apiKeysRef.current;
+
+        if (currentProvider === 'gemini') {
+          return await translateWithGemini(currentKeys.gemini, model, chunkContent, lang);
+        } else if (currentProvider === 'local') {
           return await translateWithLocalLLM(localUrl, model, chunkContent, lang);
-        } else if (['groq', 'deepseek', 'openrouter'].includes(provider)) {
-          return await translateWithOpenAICompatible(provider, apiKeys[provider], model, chunkContent, lang);
+        } else if (['groq', 'deepseek', 'openrouter'].includes(currentProvider)) {
+          return await translateWithOpenAICompatible(currentProvider, currentKeys[currentProvider], model, chunkContent, lang);
         }
       } catch (err) {
         const isOverloaded = err.message.includes('overloaded') || err.message.includes('429');
@@ -223,7 +276,7 @@ function App() {
     }
   };
 
-  const processSingleFileTranslation = async (content, model, lang) => {
+  const processSingleFileTranslation = async (content, model, lang, isBatchMode = false) => {
     let isLargeFile = content.length > 15000;
     let chunks = [];
     let splitType = null;
@@ -247,16 +300,52 @@ function App() {
 
     const translatedParts = [];
     for (let i = 0; i < chunks.length; i++) {
+      // Check status at start of each iteration
+      const currentStatus = isBatchMode ? batchStatusRef.current : translationStatusRef.current;
+      if (currentStatus === 'stopped') break;
+
+      // Pause Logic
+      while ((isBatchMode ? batchStatusRef.current : translationStatusRef.current) === 'paused') {
+        if ((isBatchMode ? batchStatusRef.current : translationStatusRef.current) === 'stopped') break;
+        await delay(500);
+      }
+
+      if ((isBatchMode ? batchStatusRef.current : translationStatusRef.current) === 'stopped') break;
+
       const chunk = chunks[i];
       if (chunks.length > 1) {
         log(`Traduciendo parte ${i + 1} de ${chunks.length}...`, 'info');
       }
       const chunkContent = isLargeFile ? JSON.stringify(chunk, null, 2) : chunk;
 
-      const partJson = await translateWithRetry(model, chunkContent, lang);
-      translatedParts.push(partJson);
+      try {
+        // Use the ref to get the LATEST selected model, allowing runtime switching
+        const currentModel = selectedModelRef.current || model;
+        const partJson = await translateWithRetry(currentModel, chunkContent, lang);
+        translatedParts.push(partJson);
+      } catch (err) {
+        // Auto-pause on error
+        console.error(err);
+        log(`Error en parte ${i + 1}: ${err.message}. Pausando...`, 'error');
+
+        if (isBatchMode) {
+          setBatchStatus('paused');
+        } else {
+          setTranslationStatus('paused');
+        }
+
+        // Wait for state update to propagate to refs
+        await delay(500);
+
+        i--; // Retry this chunk when resumed
+        continue;
+      }
 
       if (chunks.length > 1) await delay(1000);
+    }
+
+    if (translationStatusRef.current === 'stopped') {
+      throw new Error("Traducción detenida por el usuario.");
     }
 
     if (isLargeFile) {
@@ -270,6 +359,7 @@ function App() {
   const handleResumeBatch = () => setBatchStatus('running');
   const handleStopBatch = () => setBatchStatus('stopped');
   const handleClearBatch = () => {
+    setFiles([]);
     setBatchFiles([]);
     setBatchStatus('idle');
   };
@@ -313,7 +403,7 @@ function App() {
               // But processModpack returns overridesZip.
               // We need to translate the langJson content.
               const jsonContent = JSON.stringify(result.langJson, null, 2);
-              finalTranslation = await processSingleFileTranslation(jsonContent, selectedModel, targetLang);
+              finalTranslation = await processSingleFileTranslation(jsonContent, selectedModel, targetLang, true);
 
               // We need to store the result differently for modpacks in batch? 
               // For now, let's assume we store the translated JSON and handle it in download.
@@ -360,7 +450,45 @@ function App() {
 
             if (langPath) {
               const text = await loadedZip.file(langPath).async('string');
-              finalTranslation = await processSingleFileTranslation(text, selectedModel, targetLang);
+
+              // --- INCREMENTAL BATCH LOGIC ---
+              let contentToTranslate = text;
+              let existingTranslation = await getExistingTranslation(loadedZip, targetLang);
+              let originalJson = null;
+
+              try {
+                originalJson = JSON.parse(text);
+                if (existingTranslation) {
+                  const missingKeys = {};
+                  let missingCount = 0;
+                  for (const key in originalJson) {
+                    if (!existingTranslation.hasOwnProperty(key)) {
+                      missingKeys[key] = originalJson[key];
+                      missingCount++;
+                    }
+                  }
+                  if (missingCount === 0) {
+                    log(`[Batch] ${newBatchFiles[i].name}: Ya traducido.`, 'success');
+                    finalTranslation = existingTranslation;
+                    // Skip translation call
+                  } else {
+                    log(`[Batch] ${newBatchFiles[i].name}: ${missingCount} claves nuevas.`, 'info');
+                    contentToTranslate = JSON.stringify(missingKeys, null, 2);
+                  }
+                }
+              } catch (e) {
+                // Ignore
+              }
+
+              if (!finalTranslation) {
+                // Use ref for model to allow switching
+                const currentModel = selectedModelRef.current || selectedModel;
+                finalTranslation = await processSingleFileTranslation(contentToTranslate, currentModel, targetLang, true);
+                if (existingTranslation) {
+                  finalTranslation = { ...existingTranslation, ...finalTranslation };
+                }
+              }
+              // -------------------------------
 
               // Create result ZIP
               const miniZip = new JSZip();
@@ -406,6 +534,10 @@ function App() {
     }
   };
 
+  const handlePauseTranslation = () => setTranslationStatus('paused');
+  const handleResumeTranslation = () => setTranslationStatus('translating');
+  const handleStopTranslation = () => setTranslationStatus('stopped');
+
   const handleTranslate = async () => {
     if (batchMode) {
       await handleBatchTranslate();
@@ -414,19 +546,78 @@ function App() {
 
     if (!selectedModel || !fileContent) return;
     setIsTranslating(true);
+    setTranslationStatus('translating');
 
     try {
       log(`Iniciando traducción a ${targetLang} con ${selectedModel}...`, 'info');
-      const finalJson = await processSingleFileTranslation(fileContent, selectedModel, targetLang);
 
-      setTranslation(JSON.stringify(finalJson, null, 2));
-      log("Traducción completada correctamente.", 'success');
+      // --- INCREMENTAL LOGIC ---
+      let contentToTranslate = fileContent;
+      let existingTranslation = null;
+      let originalJson = null;
+
+      try {
+        originalJson = JSON.parse(fileContent);
+        // Only try incremental if it's a valid JSON object/array
+        if (files.length > 0 && !isModpack) {
+          const zip = new JSZip();
+          const loadedZip = await zip.loadAsync(files[0]);
+          existingTranslation = await getExistingTranslation(loadedZip, targetLang);
+
+          if (existingTranslation) {
+            log("Se encontró una traducción existente. Analizando claves faltantes...", 'info');
+            const missingKeys = {};
+            let missingCount = 0;
+
+            // Helper to flatten/compare? For now assume flat or simple nested
+            // Simple flat key comparison for now (standard lang files)
+            for (const key in originalJson) {
+              if (!existingTranslation.hasOwnProperty(key)) {
+                missingKeys[key] = originalJson[key];
+                missingCount++;
+              }
+            }
+
+            if (missingCount === 0) {
+              log("¡Todas las claves ya están traducidas! Nada nuevo que hacer.", 'success');
+              setTranslation(JSON.stringify(existingTranslation, null, 2));
+              setIsTranslating(false);
+              setTranslationStatus('idle');
+              return;
+            }
+
+            log(`Se encontraron ${missingCount} claves nuevas/faltantes para traducir.`, 'info');
+            contentToTranslate = JSON.stringify(missingKeys, null, 2);
+          }
+        }
+      } catch (e) {
+        // Not a JSON or error parsing, skip incremental
+      }
+      // -------------------------
+
+      const finalJson = await processSingleFileTranslation(contentToTranslate, selectedModel, targetLang);
+
+      // Merge back if incremental
+      let result = finalJson;
+      if (existingTranslation) {
+        result = { ...existingTranslation, ...finalJson };
+        log("Traducción incremental completada y fusionada.", 'success');
+      } else {
+        log("Traducción completada correctamente.", 'success');
+      }
+
+      setTranslation(JSON.stringify(result, null, 2));
 
     } catch (err) {
       console.error(err);
-      log(`Error: ${err.message}`, 'error');
+      if (err.message === "Traducción detenida por el usuario.") {
+        log("Traducción detenida.", 'warning');
+      } else {
+        log(`Error: ${err.message}`, 'error');
+      }
     } finally {
       setIsTranslating(false);
+      setTranslationStatus('idle');
     }
   };
 
@@ -655,6 +846,10 @@ function App() {
               onTranslate={handleTranslate}
               isTranslating={isTranslating}
               onDownload={handleDownload}
+              translationStatus={translationStatus}
+              onPause={handlePauseTranslation}
+              onResume={handleResumeTranslation}
+              onStop={handleStopTranslation}
             />
           )}
         </div>
