@@ -9,7 +9,11 @@ const Editor = ({
     translation,
     onTranslate,
     isTranslating,
-    onDownload
+    onDownload,
+    translationStatus,
+    onPause,
+    onResume,
+    onStop
 }) => {
     return (
         <div className="flex-1 flex gap-4 min-h-[400px]">
@@ -55,19 +59,39 @@ const Editor = ({
                         />
                     </div>
 
-                    {/* Arrow Action */}
+                    {/* Arrow Action / Controls */}
                     <div className="flex flex-col justify-center gap-2">
-                        <button
-                            onClick={onTranslate}
-                            disabled={!fileContent || isTranslating}
-                            className={`p-3 rounded-full transition-all shadow-lg ${!fileContent ? 'bg-gray-800 text-gray-600 cursor-not-allowed border border-gray-700' :
-                                isTranslating ? 'bg-yellow-600 text-white animate-pulse shadow-[0_0_15px_rgba(202,138,4,0.4)]' :
-                                    'bg-gradient-to-br from-fuchsia-600 to-purple-600 text-white hover:scale-110 hover:shadow-[0_0_20px_rgba(217,70,239,0.6)] border border-fuchsia-500/30'
-                                }`}
-                            title="Traducir"
-                        >
-                            {isTranslating ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <ArrowRight size={20} />}
-                        </button>
+                        {translationStatus === 'idle' || translationStatus === 'stopped' ? (
+                            <button
+                                onClick={onTranslate}
+                                disabled={!fileContent || isTranslating}
+                                className={`p-3 rounded-full transition-all shadow-lg ${!fileContent ? 'bg-gray-800 text-gray-600 cursor-not-allowed border border-gray-700' :
+                                    isTranslating ? 'bg-yellow-600 text-white animate-pulse shadow-[0_0_15px_rgba(202,138,4,0.4)]' :
+                                        'bg-gradient-to-br from-fuchsia-600 to-purple-600 text-white hover:scale-110 hover:shadow-[0_0_20px_rgba(217,70,239,0.6)] border border-fuchsia-500/30'
+                                    }`}
+                                title="Traducir"
+                            >
+                                {isTranslating ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <ArrowRight size={20} />}
+                            </button>
+                        ) : (
+                            <div className="flex flex-col gap-2">
+                                {/* Pause/Resume */}
+                                {translationStatus === 'translating' && (
+                                    <button onClick={onPause} className="p-3 bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30 rounded-full transition-all border border-yellow-500/30" title="Pausar">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+                                    </button>
+                                )}
+                                {translationStatus === 'paused' && (
+                                    <button onClick={onResume} className="p-3 bg-green-500/20 text-green-400 hover:bg-green-500/30 rounded-full transition-all animate-pulse border border-green-500/30" title="Reanudar">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                                    </button>
+                                )}
+                                {/* Stop */}
+                                <button onClick={onStop} className="p-3 bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded-full transition-all border border-red-500/30" title="Cancelar">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
+                                </button>
+                            </div>
+                        )}
                     </div>
 
                     {/* Translated Content */}
