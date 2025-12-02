@@ -69,20 +69,6 @@ function App() {
     log(`Conectando a ${providerName}...`, 'info');
 
     try {
-      let validModels = [];
-      if (provider === 'gemini') {
-        validModels = await discoverGeminiModels(apiKeys.gemini);
-        localStorage.setItem('gemini_key_v5', apiKeys.gemini);
-      } else if (provider === 'local') {
-        validModels = await discoverLocalModels(localUrl);
-      } else if (['groq', 'deepseek', 'openrouter'].includes(provider)) {
-        validModels = await discoverOpenAIModels(provider, apiKeys[provider]);
-        localStorage.setItem(`${provider}_key`, apiKeys[provider]);
-      }
-
-      if (validModels.length === 0) throw new Error("No se encontraron modelos disponibles.");
-
-      setModelsList(validModels);
       setSelectedModel(validModels[0]);
       setConnectionStatus('success');
       log(`Conectado. ${validModels.length} modelos encontrados.`, 'success');
@@ -194,7 +180,7 @@ function App() {
 
   const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-  const translateWithRetry = async (apiKey, model, chunkContent, lang, retries = 3) => {
+  const translateWithRetry = async (model, chunkContent, lang, retries = 3) => {
     for (let i = 0; i < retries; i++) {
       try {
         if (provider === 'gemini') {
@@ -207,7 +193,7 @@ function App() {
       } catch (err) {
         const isOverloaded = err.message.includes('overloaded') || err.message.includes('429');
         if (isOverloaded && i < retries - 1) {
-          const waitTime = 2000 * (i + 1); // Exponential backoff: 2s, 4s, 6s...
+          const waitTime = 2000 * (i + 1);
           console.warn(`Model overloaded. Retrying in ${waitTime}ms... (Attempt ${i + 1}/${retries})`);
           await delay(waitTime);
         } else {
@@ -218,7 +204,6 @@ function App() {
   };
 
   const processSingleFileTranslation = async (content, model, lang) => {
-    // Helper function to reuse translation logic
     let isLargeFile = content.length > 15000;
     let chunks = [];
     let splitType = null;
@@ -248,11 +233,9 @@ function App() {
       }
       const chunkContent = isLargeFile ? JSON.stringify(chunk, null, 2) : chunk;
 
-      // Use retry wrapper
-      const partJson = await translateWithRetry(apiKey, model, chunkContent, lang);
+      const partJson = await translateWithRetry(model, chunkContent, lang);
       translatedParts.push(partJson);
 
-      // Small delay between chunks to be nice to the API
       if (chunks.length > 1) await delay(1000);
     }
 
@@ -261,151 +244,6 @@ function App() {
     } else {
       return translatedParts[0];
     }
-  };
-
-  const handleBatchTranslate = async () => {
-    if (!selectedModel) return;
-    setIsTranslating(true);
-
-    const newBatchFiles = [...batchFiles];
-
-    for (let i = 0; i < newBatchFiles.length; i++) {
-      const item = newBatchFiles[i];
-      if (item.status === 'done' || item.status === 'warning') continue;
-
-      // Update status to translating
-      newBatchFiles[i] = { ...item, status: 'translating' };
-      setBatchFiles([...newBatchFiles]);
-      log(`Procesando archivo ${i + 1}/${newBatchFiles.length}: ${item.name}...`, 'info');
-
-      try {
-        const zip = new JSZip();
-        const loadedZip = await zip.loadAsync(item.file);
-
-        // 1. Find Source Language File (en_us.json or any .json)
-        let sourcePath = null;
-        loadedZip.forEach((path, entry) => {
-          if (!entry.dir && path.includes('/lang/') && path.endsWith('en_us.json')) {
-            sourcePath = path;
-          }
-        });
-
-        if (!sourcePath) {
-          loadedZip.forEach((path, entry) => {
-            if (!entry.dir && path.includes('/lang/') && path.endsWith('.json')) {
-              sourcePath = path;
-            }
-          });
-        }
-
-        if (!sourcePath) {
-          newBatchFiles[i] = { ...item, status: 'warning' };
-          setBatchFiles([...newBatchFiles]);
-          log(`Advertencia en ${item.name}: No se encontró archivo de idioma base. Saltando...`, 'warning');
-          continue;
-        }
-
-        // 2. Read Source Content
-        const sourceContentStr = await loadedZip.file(sourcePath).async('string');
-        let sourceJson = {};
-        try {
-          sourceJson = JSON.parse(sourceContentStr);
-        } catch (e) {
-          // Try JSON5 or loose parsing if strictly needed, but usually standard JSON for MC
-          console.error("Error parsing source JSON", e);
-          throw new Error("El archivo de idioma base está corrupto.");
-        }
-
-        // 3. Check for Existing Target Language File (Incremental Translation)
-        const langCode = targetLang.length === 2 ? `${targetLang}_${targetLang}` : targetLang;
-        const targetFileName = `${langCode}.json`;
-        let existingTargetPath = null;
-
-        // Try to find the target file in the same folder structure as source
-        const sourceDir = sourcePath.substring(0, sourcePath.lastIndexOf('/') + 1);
-        const potentialPath = sourceDir + targetFileName;
-
-        if (loadedZip.file(potentialPath)) {
-          existingTargetPath = potentialPath;
-        }
-
-        let existingTargetJson = {};
-        let keysToTranslate = {};
-        let reusedCount = 0;
-
-        if (existingTargetPath) {
-          log(`  -> Archivo de idioma existente detectado (${targetFileName}). Analizando faltantes...`, 'info');
-          try {
-            const existingContentStr = await loadedZip.file(existingTargetPath).async('string');
-            existingTargetJson = JSON.parse(existingContentStr);
-
-            // Compare keys
-            Object.keys(sourceJson).forEach(key => {
-              if (!existingTargetJson[key]) {
-                keysToTranslate[key] = sourceJson[key];
-              } else {
-                reusedCount++;
-              }
-            });
-
-            if (Object.keys(keysToTranslate).length === 0) {
-              log(`  -> ¡Traducción completa encontrada! Reusando 100% (${reusedCount} textos).`, 'success');
-            } else {
-              log(`  -> Reusando ${reusedCount} textos. Traduciendo ${Object.keys(keysToTranslate).length} nuevos...`, 'info');
-            }
-
-          } catch (e) {
-            console.warn("Error parsing existing target file, ignoring it.", e);
-            keysToTranslate = sourceJson; // Fallback to full translation
-          }
-        } else {
-          keysToTranslate = sourceJson;
-        }
-
-        // 4. Translate (if needed)
-        let finalTranslatedJson = { ...existingTargetJson };
-
-        if (Object.keys(keysToTranslate).length > 0) {
-          const contentToTranslate = JSON.stringify(keysToTranslate, null, 2);
-          const translatedPart = await processSingleFileTranslation(contentToTranslate, selectedModel, targetLang);
-
-          // Merge new translations
-          finalTranslatedJson = { ...finalTranslatedJson, ...translatedPart };
-        }
-
-        // 5. Generate Result ZIP
-        const resultZip = new JSZip();
-        const newPath = `assets/translated_mod/lang/${targetFileName}`;
-
-        resultZip.file(newPath, JSON.stringify(finalTranslatedJson, null, 2));
-        resultZip.file("pack.mcmeta", JSON.stringify({
-          pack: {
-            pack_format: 15,
-            description: `Traducción IA (${targetLang}) por JarLoc: ${item.name}`
-          }
-        }, null, 2));
-
-        const blob = await resultZip.generateAsync({ type: "blob" });
-
-        newBatchFiles[i] = { ...item, status: 'done', result: blob };
-        setBatchFiles([...newBatchFiles]);
-        log(`Archivo ${item.name} completado.`, 'success');
-
-        // Delay between files only if we actually translated something
-        if (Object.keys(keysToTranslate).length > 0) {
-          await delay(1000);
-        }
-
-      } catch (err) {
-        console.error(err);
-        newBatchFiles[i] = { ...item, status: 'error' };
-        setBatchFiles([...newBatchFiles]);
-        log(`Error en ${item.name}: ${err.message}`, 'error');
-      }
-    }
-
-    setIsTranslating(false);
-    log("Proceso por lotes finalizado.", 'success');
   };
 
   const handleTranslate = async () => {
@@ -418,9 +256,6 @@ function App() {
     setIsTranslating(true);
 
     try {
-      // Reuse the helper function logic, but kept inline for now to match original flow or refactor
-      // For minimal risk, I'll use the helper here too since it encapsulates the same logic
-
       log(`Iniciando traducción a ${targetLang} con ${selectedModel}...`, 'info');
       const finalJson = await processSingleFileTranslation(fileContent, selectedModel, targetLang);
 
@@ -495,6 +330,14 @@ function App() {
           }
         }, null, 2));
 
+        // Add logo as pack.png
+        try {
+          const logoBlob = await fetch('/logo.png').then(r => r.blob());
+          zip.file("pack.png", logoBlob);
+        } catch (e) {
+          console.warn("No se pudo cargar el logo para pack.png", e);
+        }
+
         const b = await zip.generateAsync({ type: "blob" });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(b);
@@ -568,6 +411,14 @@ function App() {
       }, null, 2));
 
       // 4. Generate and download the master zip
+      // Add logo as pack.png
+      try {
+        const logoBlob = await fetch('/logo.png').then(r => r.blob());
+        masterZip.file("pack.png", logoBlob);
+      } catch (e) {
+        console.warn("No se pudo cargar el logo para pack.png", e);
+      }
+
       const b = await masterZip.generateAsync({ type: "blob" });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(b);
@@ -628,6 +479,11 @@ function App() {
               onDownloadAll={handleBatchDownload}
               onTranslate={handleTranslate}
               isTranslating={isTranslating}
+              batchStatus={batchStatus}
+              onPause={handlePauseBatch}
+              onResume={handleResumeBatch}
+              onStop={handleStopBatch}
+              onClear={handleClearBatch}
             />
           ) : (
             <Editor
