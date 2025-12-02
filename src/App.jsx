@@ -43,6 +43,12 @@ function App() {
   const [batchMode, setBatchMode] = useState(false);
   const [batchFiles, setBatchFiles] = useState([]); // { name, file, status: 'pending'|'translating'|'done'|'error', result: blob }
   const [basePacks, setBasePacks] = useState([]); // Array of existing resource packs to merge
+  const [batchStatus, setBatchStatus] = useState('idle'); // 'idle' | 'running' | 'paused' | 'stopped'
+  const batchStatusRef = React.useRef(batchStatus);
+
+  useEffect(() => {
+    batchStatusRef.current = batchStatus;
+  }, [batchStatus]);
 
   // --- MODPACK STATE ---
   const [isModpack, setIsModpack] = useState(false);
@@ -257,6 +263,146 @@ function App() {
       return mergeJson(translatedParts, splitType);
     } else {
       return translatedParts[0];
+    }
+  };
+
+  const handlePauseBatch = () => setBatchStatus('paused');
+  const handleResumeBatch = () => setBatchStatus('running');
+  const handleStopBatch = () => setBatchStatus('stopped');
+  const handleClearBatch = () => {
+    setBatchFiles([]);
+    setBatchStatus('idle');
+  };
+
+  const handleBatchTranslate = async () => {
+    if (batchFiles.length === 0) return;
+    setBatchStatus('running');
+    setIsTranslating(true);
+
+    const newBatchFiles = [...batchFiles];
+
+    for (let i = 0; i < newBatchFiles.length; i++) {
+      // Check status at start of each iteration
+      if (batchStatusRef.current === 'stopped') break;
+
+      // Pause Logic
+      while (batchStatusRef.current === 'paused') {
+        if (batchStatusRef.current === 'stopped') break;
+        await delay(500);
+      }
+
+      if (batchStatusRef.current === 'stopped') break;
+
+      if (newBatchFiles[i].status === 'pending' || newBatchFiles[i].status === 'error') {
+        newBatchFiles[i].status = 'translating';
+        setBatchFiles([...newBatchFiles]);
+
+        try {
+          // 1. Check if it's a Modpack
+          const tempZip = new JSZip();
+          const loadedZip = await tempZip.loadAsync(newBatchFiles[i].file);
+          const isFTB = Object.keys(loadedZip.files).some(path => path.includes('config/ftbquests/quests/chapters/'));
+
+          let finalTranslation = null;
+
+          if (isFTB) {
+            log(`[Batch] Procesando Modpack: ${newBatchFiles[i].name}`, 'info');
+            const result = await processModpack(newBatchFiles[i].file);
+            if (result.count > 0) {
+              // For modpacks, we just need the langJson to be translated
+              // But processModpack returns overridesZip.
+              // We need to translate the langJson content.
+              const jsonContent = JSON.stringify(result.langJson, null, 2);
+              finalTranslation = await processSingleFileTranslation(jsonContent, selectedModel, targetLang);
+
+              // We need to store the result differently for modpacks in batch? 
+              // For now, let's assume we store the translated JSON and handle it in download.
+              // Actually, handleBatchDownload expects a ZIP in 'result'.
+              // So we need to create a mini-zip here for the result.
+              const miniZip = new JSZip();
+              // Add overrides
+              const overridesFiles = Object.keys(result.overridesZip.files);
+              for (const path of overridesFiles) {
+                if (!result.overridesZip.files[path].dir) {
+                  const content = await result.overridesZip.file(path).async('string');
+                  miniZip.file(path, content);
+                }
+              }
+              // Add lang
+              const langCode = targetLang.length === 2 ? `${targetLang}_${targetLang}` : targetLang;
+              miniZip.file(`kubejs/assets/kubejs/lang/${langCode}.json`, JSON.stringify(finalTranslation, null, 2));
+
+              const blob = await miniZip.generateAsync({ type: "blob" });
+              newBatchFiles[i].result = blob;
+              newBatchFiles[i].status = 'done';
+            } else {
+              newBatchFiles[i].status = 'warning'; // No quests found
+            }
+
+          } else {
+            // Standard Mod
+            log(`[Batch] Traduciendo: ${newBatchFiles[i].name}`, 'info');
+            let langPath = null;
+            loadedZip.forEach((path, entry) => {
+              if (!entry.dir && path.includes('/lang/') && path.endsWith('.json') && path.includes('en_us')) {
+                langPath = path;
+              }
+            });
+
+            if (!langPath) {
+              // Try any json in lang
+              loadedZip.forEach((path, entry) => {
+                if (!entry.dir && path.includes('/lang/') && path.endsWith('.json')) {
+                  langPath = path;
+                }
+              });
+            }
+
+            if (langPath) {
+              const text = await loadedZip.file(langPath).async('string');
+              finalTranslation = await processSingleFileTranslation(text, selectedModel, targetLang);
+
+              // Create result ZIP
+              const miniZip = new JSZip();
+              const langCode = targetLang.length === 2 ? `${targetLang}_${targetLang}` : targetLang;
+              const langFileName = `${langCode}.json`;
+              let newPath = `assets/translated_mod/lang/${langFileName}`;
+
+              // Try to preserve path structure if possible
+              const pathParts = langPath.split('/');
+              if (pathParts.length >= 3 && pathParts.includes('lang')) {
+                pathParts[pathParts.length - 1] = langFileName;
+                newPath = pathParts.join('/');
+              }
+
+              miniZip.file(newPath, JSON.stringify(finalTranslation, null, 2));
+              const blob = await miniZip.generateAsync({ type: "blob" });
+              newBatchFiles[i].result = blob;
+              newBatchFiles[i].status = 'done';
+
+            } else {
+              newBatchFiles[i].status = 'warning';
+              log(`[Batch] No se encontró archivo de idioma en ${newBatchFiles[i].name}`, 'warning');
+            }
+          }
+
+        } catch (err) {
+          console.error(err);
+          log(`[Batch] Error en ${newBatchFiles[i].name}: ${err.message}`, 'error');
+          newBatchFiles[i].status = 'error';
+
+          // Auto-pause on error
+          setBatchStatus('paused');
+          log(`[Batch] Proceso PAUSADO por error. Revisa y pulsa Reanudar.`, 'warning');
+        }
+
+        setBatchFiles([...newBatchFiles]);
+      }
+    }
+
+    setIsTranslating(false);
+    if (batchStatusRef.current !== 'paused') {
+      setBatchStatus('idle');
     }
   };
 
